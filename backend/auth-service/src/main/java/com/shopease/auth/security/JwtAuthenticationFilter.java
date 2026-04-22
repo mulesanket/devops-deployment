@@ -1,4 +1,4 @@
-package com.shopease.security;
+package com.shopease.auth.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

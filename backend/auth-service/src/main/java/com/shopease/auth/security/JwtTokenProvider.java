@@ -1,4 +1,4 @@
-package com.shopease.security;
+package com.shopease.auth.security;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;

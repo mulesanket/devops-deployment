@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { signup } from '../api/auth'
+import { authApi } from '../api/auth'
+import { useAuth } from '../context/AuthContext'
 
 function Signup() {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { login } = useAuth()
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value })
 
@@ -19,9 +21,8 @@ function Signup() {
     }
     setLoading(true)
     try {
-      const data = await signup(form.name, form.email, form.password)
-      localStorage.setItem('token', data.token)
-      localStorage.setItem('user', JSON.stringify({ name: data.name, email: data.email }))
+      const data = await authApi.signup(form.name, form.email, form.password)
+      login({ name: data.name, email: data.email }, data.token)
       navigate('/')
     } catch (err) {
       setError(err.message)

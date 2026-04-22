@@ -1,14 +1,14 @@
-package com.shopease.service;
+package com.shopease.auth.service;
 
-import com.shopease.dto.AuthResponse;
-import com.shopease.dto.LoginRequest;
-import com.shopease.dto.SignupRequest;
-import com.shopease.model.User;
-import com.shopease.repository.UserRepository;
-import com.shopease.security.JwtTokenProvider;
+import com.shopease.auth.dto.AuthResponse;
+import com.shopease.auth.dto.LoginRequest;
+import com.shopease.auth.dto.SignupRequest;
+import com.shopease.auth.model.User;
+import com.shopease.auth.repository.UserRepository;
+import com.shopease.auth.security.JwtTokenProvider;
+import com.shopease.common.exception.ResourceAlreadyExistsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -33,7 +33,7 @@ public class AuthService {
 
     public AuthResponse signup(SignupRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already exists");
+            throw new ResourceAlreadyExistsException("Email already exists");
         }
 
         User user = new User();
@@ -47,7 +47,6 @@ public class AuthService {
             snsService.publishSignupEvent(user.getName(), user.getEmail());
         } catch (Exception e) {
             System.err.println("Failed to publish SNS event: " + e.getMessage());
-            // Don't fail signup if SNS fails
         }
 
         String token = tokenProvider.generateToken(user.getEmail());
@@ -55,7 +54,7 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request) {
-        Authentication authentication = authenticationManager.authenticate(
+        authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
         );
 

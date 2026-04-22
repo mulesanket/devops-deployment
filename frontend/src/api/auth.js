@@ -1,24 +1,7 @@
-// Use same hostname as the browser (works for localhost AND EC2 public IP)
-const API_BASE = `http://${window.location.hostname}:8080/api`
+import { api } from './client'
 
-export const signup = async (name, email, password) => {
-  const response = await fetch(`${API_BASE}/auth/signup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password }),
-  })
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.message || 'Signup failed')
-  return data
-}
-
-export const login = async (email, password) => {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.message || 'Login failed')
-  return data
+export const authApi = {
+  signup: (name, email, password) => api.post('/auth/signup', { name, email, password }),
+  login: (email, password) => api.post('/auth/login', { email, password }),
+  health: () => api.get('/auth/health'),
 }

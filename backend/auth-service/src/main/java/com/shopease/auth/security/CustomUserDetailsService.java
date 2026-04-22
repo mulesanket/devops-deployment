@@ -1,7 +1,7 @@
-package com.shopease.security;
+package com.shopease.auth.security;
 
-import com.shopease.model.User;
-import com.shopease.repository.UserRepository;
+import com.shopease.auth.model.User;
+import com.shopease.auth.repository.UserRepository;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.stereotype.Service;
 

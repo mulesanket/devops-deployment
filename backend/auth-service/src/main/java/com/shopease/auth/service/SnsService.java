@@ -1,4 +1,4 @@
-package com.shopease.service;
+package com.shopease.auth.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;

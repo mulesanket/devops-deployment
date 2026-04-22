@@ -1,6 +1,6 @@
-package com.shopease.config;
+package com.shopease.auth.config;
 
-import com.shopease.security.JwtAuthenticationFilter;
+import com.shopease.auth.security.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
