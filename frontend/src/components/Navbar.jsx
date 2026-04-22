@@ -14,11 +14,10 @@ function Navbar() {
     <nav className="navbar">
       <Link to="/" className="logo">
         Shop<span>Ease</span>
-      </Link>
-      <ul className="nav-links">
-        <li><a href="#categories">Categories</a></li>
-        <li><a href="#features">Features</a></li>
-        <li><a href="#about">About</a></li>
+      </Link>      <ul className="nav-links">
+        <li><Link to="/products">Products</Link></li>
+        <li><a href="/#categories">Categories</a></li>
+        <li><a href="/#about">About</a></li>
         {isAuthenticated ? (
           <li className="nav-user">
             <span>👋 {user.name}</span>
