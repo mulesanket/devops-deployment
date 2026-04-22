@@ -1,15 +1,29 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { login } from '../api/auth'
 
 function Login() {
   const [form, setForm] = useState({ email: '', password: '' })
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value })
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    console.log('Login:', form)
-    // TODO: call backend API
+    setError('')
+    setLoading(true)
+    try {
+      const data = await login(form.email, form.password)
+      localStorage.setItem('token', data.token)
+      localStorage.setItem('user', JSON.stringify({ name: data.name, email: data.email }))
+      navigate('/')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -17,6 +31,7 @@ function Login() {
       <div className="auth-card">
         <h2>Welcome Back</h2>
         <p className="auth-subtitle">Sign in to your account</p>
+        {error && <p className="auth-error">{error}</p>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label>Email</label>
@@ -26,7 +41,9 @@ function Login() {
             <label>Password</label>
             <input type="password" name="password" placeholder="••••••••" value={form.password} onChange={handleChange} required />
           </div>
-          <button type="submit" className="btn-auth">Sign In</button>
+          <button type="submit" className="btn-auth" disabled={loading}>
+            {loading ? 'Signing In...' : 'Sign In'}
+          </button>
         </form>
         <p className="auth-footer">
           Don't have an account? <Link to="/signup">Sign Up</Link>
