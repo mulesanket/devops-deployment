@@ -83,6 +83,43 @@ a {
   background: #5a52e0;
 }
 
+/* ===== HAMBURGER ===== */
+.hamburger {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  z-index: 200;
+}
+
+.hamburger span {
+  display: block;
+  width: 24px;
+  height: 2.5px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  transition: transform 0.3s, opacity 0.3s;
+}
+
+.hamburger.active span:nth-child(1) {
+  transform: translateY(7.5px) rotate(45deg);
+}
+
+.hamburger.active span:nth-child(2) {
+  opacity: 0;
+}
+
+.hamburger.active span:nth-child(3) {
+  transform: translateY(-7.5px) rotate(-45deg);
+}
+
+.nav-overlay {
+  display: none;
+}
+
 /* ===== HERO ===== */
 .hero {
   display: flex;
@@ -1497,19 +1534,73 @@ a {
 
 /* Mobile */
 @media (max-width: 768px) {
-  .navbar {
-    padding: 0.8rem 4%;
+  /* Hamburger Nav */
+  .hamburger {
+    display: flex;
+  }
+  .nav-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
   }
   .nav-links {
-    gap: 0.8rem;
+    position: fixed;
+    top: 0;
+    right: -280px;
+    width: 270px;
+    height: 100vh;
+    background: #fff;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 5rem 1.5rem 2rem;
+    gap: 0.3rem;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+    z-index: 150;
+    transition: right 0.3s ease;
+    overflow-y: auto;
+  }
+  .nav-links.open {
+    right: 0;
+  }
+  .nav-links li {
+    width: 100%;
   }
   .nav-links a {
-    font-size: 0.85rem;
+    display: block;
+    padding: 0.7rem 0.5rem;
+    font-size: 1rem;
+    border-radius: 8px;
+    width: 100%;
   }
-  .nav-links .btn-login,
+  .nav-links a:hover {
+    background: #f0eeff;
+  }
+  .nav-links .btn-login {
+    text-align: center;
+    margin-top: 0.5rem;
+  }
   .nav-links .btn-signup {
-    padding: 0.4rem 0.9rem;
-    font-size: 0.85rem;
+    text-align: center;
+    display: block;
+  }
+  .nav-links .nav-cart-link {
+    display: block;
+    padding: 0.7rem 0.5rem;
+  }
+  .nav-user {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #eee;
+    margin-top: 0.5rem;
+    width: 100%;
+  }
+
+  .navbar {
+    padding: 0.8rem 4%;
   }
   .hero {
     padding: 4rem 5% 3rem;
@@ -1570,24 +1661,6 @@ a {
   }
   .navbar .logo {
     font-size: 1.3rem;
-  }
-  .nav-links {
-    gap: 0.5rem;
-  }
-  .nav-links a {
-    font-size: 0.8rem;
-  }
-  .nav-links .btn-login,
-  .nav-links .btn-signup {
-    padding: 0.35rem 0.7rem;
-    font-size: 0.8rem;
-  }
-  .nav-user span {
-    font-size: 0.85rem;
-  }
-  .btn-logout {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.8rem;
   }
   .hero {
     padding: 3rem 5% 2rem;
