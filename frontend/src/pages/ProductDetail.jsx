@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { productApi } from '../api/products'
+import { useAuth } from '../context/AuthContext'
+import { useCart } from '../context/CartContext'
 
 function ProductDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const { isAuthenticated } = useAuth()
+  const { addToCart } = useCart()
   const [product, setProduct] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [adding, setAdding] = useState(false)
 
   useEffect(() => {
     loadProduct()
@@ -46,12 +52,17 @@ function ProductDetail() {
             ) : (
               <span className="out-stock">✗ Out of Stock</span>
             )}
-          </div>
-          <button
+          </div>          <button
             className="btn-add-cart"
-            disabled={product.stock === 0}
+            disabled={product.stock === 0 || adding}
+            onClick={async () => {
+              if (!isAuthenticated) { navigate('/login'); return }
+              setAdding(true)
+              try { await addToCart(product) } catch (e) { console.error(e) }
+              finally { setAdding(false) }
+            }}
           >
-            {product.stock > 0 ? 'Add to Cart' : 'Out of Stock'}
+            {adding ? 'Adding...' : product.stock > 0 ? 'Add to Cart' : 'Out of Stock'}
           </button>
         </div>
       </div>
