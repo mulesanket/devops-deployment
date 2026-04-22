@@ -1,4 +1,5 @@
-const API_BASE = 'http://localhost:8080/api'
+// Use same hostname as the browser (works for localhost AND EC2 public IP)
+const API_BASE = `http://${window.location.hostname}:8080/api`
 
 export const signup = async (name, email, password) => {
   const response = await fetch(`${API_BASE}/auth/signup`, {
