@@ -18,13 +18,15 @@ function Navbar() {
         Shop<span>Ease</span>
       </Link>      <ul className="nav-links">        <li><Link to="/products">Products</Link></li>
         <li><a href="/#categories">Categories</a></li>
-        <li><a href="/#about">About</a></li>
-        {isAuthenticated && (
+        <li><a href="/#about">About</a></li>        {isAuthenticated && (
           <li>
             <Link to="/cart" className="nav-cart-link">
               🛒 Cart{cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
             </Link>
           </li>
+        )}
+        {isAuthenticated && (
+          <li><Link to="/orders">My Orders</Link></li>
         )}
         {isAuthenticated ? (
           <li className="nav-user">

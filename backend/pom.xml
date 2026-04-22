@@ -25,7 +25,7 @@
         <module>shopease-common</module>
         <module>auth-service</module>
         <module>product-service</module>        <module>cart-service</module>
-        <!-- <module>order-service</module> -->
+        <module>order-service</module>
         <!-- <module>api-gateway</module> -->
     </modules>
 

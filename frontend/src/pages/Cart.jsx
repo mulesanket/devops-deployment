@@ -1,10 +1,11 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
 
 function Cart() {
   const { isAuthenticated } = useAuth()
   const { cart, loading, updateQuantity, removeItem, clearCart } = useCart()
+  const navigate = useNavigate()
 
   if (!isAuthenticated) {
     return (
@@ -77,7 +78,7 @@ function Cart() {
                 <span>Total</span>
                 <span>${cart.totalPrice.toFixed(2)}</span>
               </div>
-              <button className="btn-checkout">Proceed to Checkout</button>
+              <button className="btn-checkout" onClick={() => navigate('/checkout')}>Proceed to Checkout</button>
               <button className="btn-clear-cart" onClick={clearCart}>Clear Cart</button>
             </div>
           </>
