@@ -24,7 +24,7 @@ module "cloudfront" {
 module "s3_cloudfront_policy" {
   source                      = "../../modules/policies"
   s3_bucket_id                = module.s3_frontend.frontend_bucket_id
-  cloudfront_distribution_arn = module.cloudfront.cloudfront_distribution_id
+  cloudfront_distribution_arn = module.cloudfront.cloudfront_distribution_arn
   s3_bucket_arn               = module.s3_frontend.frontend_bucket_arn
-
+  account_id                  = "483829975256"
 }
