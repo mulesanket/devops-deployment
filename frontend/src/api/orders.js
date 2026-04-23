@@ -1,4 +1,4 @@
-const ORDER_API = `http://${window.location.hostname}:8083/api`
+const ORDER_API = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8083/api`
 
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('token')

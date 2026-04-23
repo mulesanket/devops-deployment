@@ -1,4 +1,4 @@
-const API_BASE = `http://${window.location.hostname}:8080/api`
+const API_BASE = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8080/api`
 
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('token')

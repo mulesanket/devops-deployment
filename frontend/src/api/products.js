@@ -1,4 +1,4 @@
-const PRODUCT_API = `http://${window.location.hostname}:8081/api`
+const PRODUCT_API = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8081/api`
 
 async function request(endpoint) {
   const response = await fetch(`${PRODUCT_API}${endpoint}`)
