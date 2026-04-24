@@ -57,7 +57,7 @@ resource "aws_cloudfront_distribution" "frontend_distribution" {
   price_class = var.price_class
 
   tags = {
-    Name        = "${var.project_name}-frontend-cloudfront"
+    Name        = "${var.project_name}-frontend-cloudfront-distribution"
     Environment = var.environment
   }
 }
