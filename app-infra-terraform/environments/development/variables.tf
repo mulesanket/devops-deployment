@@ -16,3 +16,18 @@ variable "project_name" {
   default     = "development"
 }
 
+variable "eks_cluster_name" {
+  description = "EKS cluster name"
+  type        = string
+  default     = "shopease-webapp"
+}
+
+variable "eks_version" {
+  description = "EKS cluster version"
+  type        = string
+}
+
+variable "worker_instance_type" {
+  description = "EKS worker nodes instance type"
+  type        = string
+}
