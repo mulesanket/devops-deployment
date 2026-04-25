@@ -16,7 +16,7 @@ resource "aws_eks_cluster" "eks_control_plane" {
   }
 
   tags = {
-    Name = var.eks_cluster_name
+    Name = "${var.eks_cluster_name}-cluster"
   }
 }
 

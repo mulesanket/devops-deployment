@@ -20,13 +20,16 @@ module "cloudfront" {
   s3_bucket_regional_domain_name = module.s3_frontend.bucket_regional_domain_name
 }
 
-# module "policies": S3 - Cloudfront Bucket Policy Attachment
+# module "policies": policy attachment to resources
 module "s3_cloudfront_policy" {
   source                      = "../../modules/policies"
   s3_bucket_id                = module.s3_frontend.frontend_bucket_id
   cloudfront_distribution_arn = module.cloudfront.cloudfront_distribution_arn
   s3_bucket_arn               = module.s3_frontend.frontend_bucket_arn
   account_id                  = "483829975256"
+  sns_topic_arn               = module.signup_sns.topic_arn
+  sqs_queue_arn               = module.signup_sqs.queue_arn
+  sqs_queue_url               = module.signup_sqs.queue_url
 }
 
 # module "VPC & it's Components"
@@ -56,7 +59,61 @@ module "eks" {
   private_subnet_ids   = module.vpc.private_subnet_ids
   eks_node_role_arn    = module.eks_iam_roles.eks_cluster_node_role_arn
   worker_instance_type = "t3.medium"
-
   # ensure cluster waits for VPC + IAM
   depends_on = [module.vpc, module.eks_iam_roles]
 }
+
+# module "RDS Aurora PostgreSQL Serverless v2"
+module "rds" {
+  source = "../../modules/rds"
+
+  project_name                = var.project_name
+  environment                 = var.environment
+  vpc_id                      = module.vpc.vpc_id
+  private_subnet_ids          = module.vpc.private_subnet_ids
+  eks_node_security_group_ids = [module.eks.eks_cluster_security_group_id]
+  database_name               = "shopease"
+  master_username             = "shopease_admin"
+  master_password             = var.db_master_password
+  engine_version              = "17.5"
+  serverless_min_capacity     = 1
+  serverless_max_capacity     = 2
+  instance_count              = 1
+  deletion_protection         = false
+
+  depends_on = [module.vpc, module.eks]
+}
+
+# module "SNS"
+module "signup_sns" {
+  source       = "../../modules/sns"
+  project_name = var.project_name
+  environment  = var.environment
+}
+
+# module "SQS"
+module "signup_sqs" {
+  source        = "../../modules/sqs"
+  project_name  = var.project_name
+  environment   = var.environment
+  sns_topic_arn = module.signup_sns.topic_arn
+}
+
+# module "Lambda - Welcome Email"
+module "welcome_email_lambda" {
+  source             = "../../modules/lambda"
+  project_name       = var.project_name
+  environment        = var.environment
+  lambda_source_path = "${path.module}/../../../../backend/lambda/welcome_email.py"
+  sqs_queue_arn      = module.signup_sqs.queue_arn
+  sender_email       = var.ses_sender_email
+
+  depends_on = [module.signup_sqs]
+}
+
+# module "SES - Sender Email Identity"
+module "ses" {
+  source       = "../../modules/ses"
+  sender_email = var.ses_sender_email
+}
+

@@ -12,3 +12,8 @@ output "eks_cluster_ca" {
   value       = aws_eks_cluster.eks_control_plane.certificate_authority[0].data
   description = "The base64-encoded certificate authority data for the cluster."
 }
+
+output "eks_cluster_security_group_id" {
+  value       = aws_eks_cluster.eks_control_plane.vpc_config[0].cluster_security_group_id
+  description = "Cluster security group created by EKS (shared by nodes)"
+}

@@ -17,5 +17,20 @@ variable "s3_bucket_arn" {
 
 variable "account_id" {
   description = "AWS Account ID"
-  type        = number
+  type        = string
+}
+
+variable "sns_topic_arn" {
+  description = "ARN of the SNS signup topic"
+  type        = string
+}
+
+variable "sqs_queue_arn" {
+  description = "ARN of the SQS signup queue"
+  type        = string
+}
+
+variable "sqs_queue_url" {
+  description = "URL of the SQS signup queue"
+  type        = string
 }

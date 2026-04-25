@@ -5,6 +5,7 @@
 # S3 Bucket
 resource "aws_s3_bucket" "frontend_bucket" {
   bucket = var.s3_frontend_bucket_name
+  force_destroy = true
 
   tags = {
     Name        = "shopease-frontend"
@@ -17,7 +18,7 @@ resource "aws_s3_bucket_versioning" "frontend_bucket_versioning" {
   bucket = aws_s3_bucket.frontend_bucket.id
 
   versioning_configuration {
-    status = "Enabled"
+    status = "Disabled"
   }
 }
 
