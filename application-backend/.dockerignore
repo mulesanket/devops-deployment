@@ -1,0 +1,25 @@
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Build output
+**/target/
+
+# Git
+.git
+.gitignore
+
+# Docker
+**/Dockerfile
+**/.dockerignore
+docker-compose*.yaml
+
+# Lambda (not needed in Java builds)
+lambda/
+
+# Docs
+*.md
+LICENSE
