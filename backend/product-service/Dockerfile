@@ -19,7 +19,7 @@ RUN mvn dependency:go-offline -B
 
 # 3. Copy source code
 COPY shopease-common/src shopease-common/src
-COPY auth-service/src auth-service/src
+COPY product-service/src product-service/src
 
 # 4. Build only the required module (and its dependency: shopease-common)
 RUN mvn clean package -pl product-service -am -DskipTests -B
