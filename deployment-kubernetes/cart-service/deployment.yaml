@@ -1,32 +1,32 @@
 # ============================================
-# Shopease: auth-service deployment
+# Shopease: cart-service deployment
 # Author: Sanket Mule
 # ============================================
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: auth-service-deployment
+  name: cart-service-deployment
   namespace: shopease-webapp-development
   labels:
-    app: auth-service-deployment
+    app: cart-service-deployment
 
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: auth-service-deployment
+      app: cart-service-deployment
   template:
     metadata:
       labels:
-        app: auth-service-deployment
+        app: cart-service-deployment
     spec:
       containers:
-      - name: auth-service-workload
-        image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:v1
+      - name: cart-service-workload
+        image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/cart-service:v1
         imagePullPolicy: Always
         ports:
-        - containerPort: 8080
+        - containerPort: 8082
 
         resources:
           requests:
@@ -38,15 +38,15 @@ spec:
 
         startupProbe:
           httpGet:
-            path: /api/auth/health
-            port: 8080
+            path: /api/cart/health
+            port: 8082
           failureThreshold: 30
           periodSeconds: 5
 
         readinessProbe:
           httpGet:
-            path: /api/auth/health
-            port: 8080
+            path: /api/cart/health
+            port: 8082
           initialDelaySeconds: 10
           periodSeconds: 30
           timeoutSeconds: 3
@@ -54,8 +54,8 @@ spec:
 
         livenessProbe:
           httpGet:
-            path: /api/auth/health
-            port: 8080
+            path: /api/cart/health
+            port: 8082
           initialDelaySeconds: 10
           periodSeconds: 30
           timeoutSeconds: 3

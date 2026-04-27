@@ -1,0 +1,11 @@
+# ============================================
+# Shopease: shopease-webapp namespace
+# Author: Sanket Mule
+# ============================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shopease-webapp-development
+  labels:
+    env: development

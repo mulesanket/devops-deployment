@@ -1,19 +1,19 @@
 # ============================================
-# Shopease: auth-service service
+# Shopease: product-service service
 # Author: Sanket Mule
 # ============================================
 
 apiVersion: v1
 kind: Service
 metadata:
-  name: auth-service
+  name: product-service
   namespace: shopease-webapp-development
-  
+
 spec:
   selector:
-    app: auth-service-deployment
+    app: product-service-deployment
   ports:
     - protocol: TCP
       port: 80         
-      targetPort: 8080
+      targetPort: 8081
   type: ClusterIP

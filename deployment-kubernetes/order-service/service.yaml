@@ -1,19 +1,19 @@
 # ============================================
-# Shopease: auth-service service
+# Shopease: order-service service
 # Author: Sanket Mule
 # ============================================
 
 apiVersion: v1
 kind: Service
 metadata:
-  name: auth-service
+  name: order-service
   namespace: shopease-webapp-development
-  
+
 spec:
   selector:
-    app: auth-service-deployment
+    app: order-service-deployment
   ports:
     - protocol: TCP
       port: 80         
-      targetPort: 8080
+      targetPort: 8083
   type: ClusterIP
