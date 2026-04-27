@@ -1,0 +1,76 @@
+# ============================================
+# Shopease: auth-service deployment
+# Author: Sanket Mule
+# ============================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: shopease
+  labels:
+    app: auth-service
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+      - name: auth-service
+        image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+
+        envFrom:
+        - configMapRef:
+            name: shopease-config
+        - secretRef:
+            name: shopease-secrets
+
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+
+        startupProbe:
+          httpGet:
+            path: /api/auth/health
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /api/auth/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        livenessProbe:
+          httpGet:
+            path: /api/auth/health
+            port: 8080
+          initialDelaySeconds: 45
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+
+
+
+
+
+
+

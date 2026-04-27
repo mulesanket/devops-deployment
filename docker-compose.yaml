@@ -1,0 +1,97 @@
+# ============================================
+# Docker Compose - ShopEase Backend Services
+# For local/EC2 testing before deploying to EKS
+# Author: Sanket Mule
+# ============================================
+
+services:
+
+  # ===== Auth Service =====
+  auth-service:
+    image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:v1
+    container_name: auth-service
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_USERNAME: shopease_admin
+      SPRING_DATASOURCE_PASSWORD: Adminuser123
+      APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
+      APP_JWT_EXPIRATION_MS: "86400000"
+      AWS_REGION: ap-south-1
+      AWS_SNS_TOPIC_ARN: arn:aws:sns:ap-south-1:483829975256:shopease-signup-topic
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/auth/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - shopease-network
+
+  # ===== Product Service =====
+  product-service:
+    image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/product-service:v1
+    container_name: product-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_USERNAME: shopease_admin
+      SPRING_DATASOURCE_PASSWORD: Adminuser123
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/api/products"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - shopease-network
+
+  # ===== Cart Service =====
+  cart-service:
+    image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/cart-service:v1
+    container_name: cart-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_USERNAME: shopease_admin
+      SPRING_DATASOURCE_PASSWORD: Adminuser123
+      APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/api/cart"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - shopease-network
+
+  # ===== Order Service =====
+  order-service:
+    image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/order-service:v1
+    container_name: order-service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_USERNAME: shopease_admin
+      SPRING_DATASOURCE_PASSWORD: Adminuser123
+      APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
+      APP_CART_SERVICE_URL: http://cart-service:8082
+    depends_on:
+      cart-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8083/api/orders"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - shopease-network
+
+networks:
+  shopease-network:
+    driver: bridge
