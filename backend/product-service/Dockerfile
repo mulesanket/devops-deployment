@@ -35,7 +35,24 @@ LABEL environment="development"
 
 WORKDIR /app
 
+# Copy the built JAR
+COPY --from=build /app/auth-service/target/product-service-*.jar /app/app.jar
+
 # Security: run as non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
+# Set ownership
+RUN chown -R appuser:appgroup /app
+
+# Change user
 USER appuser
+
+# Document port where app is listening on
+EXPOSE 8080
+
+# JVM tuning for containers
+ENTRYPOINT ["java",
+  "-XX:MaxRAMPercentage=75.0",
+  "-XX:InitialRAMPercentage=50.0",
+  "-XX:+ExitOnOutOfMemoryError",
+  "-jar", "/app/app.jar"]
