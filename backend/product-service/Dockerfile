@@ -23,3 +23,19 @@ COPY product-service/src product-service/src
 
 # 4. Build only the required module (and its dependency: shopease-common)
 RUN mvn clean package -pl product-service -am -DskipTests -B
+
+# ============================================
+# Stage 2: Runtime
+# ============================================
+FROM eclipse-temurin:21.0.5_11-jre-alpine AS runtime
+
+LABEL maintainer="Sanket Mule"
+LABEL application="shopease-product-service"
+LABEL environment="development"
+
+WORKDIR /app
+
+# Security: run as non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+USER appuser
