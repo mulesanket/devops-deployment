@@ -13,3 +13,13 @@ COPY auth-service/pom.xml auth-service/
 COPY product-service/pom.xml product-service/
 COPY cart-service/pom.xml cart-service/
 COPY order-service/pom.xml order-service/
+
+# 2. Download dependencies (cached unless pom changes)
+RUN mvn dependency:go-offline -B
+
+# 3. Copy source code
+COPY shopease-common/src shopease-common/src
+COPY auth-service/src auth-service/src
+
+# 4. Build only the required module (and its dependency: shopease-common)
+RUN mvn clean package -pl product-service -am -DskipTests -B
