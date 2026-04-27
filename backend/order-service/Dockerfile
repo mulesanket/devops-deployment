@@ -15,9 +15,9 @@ COPY order-service/pom.xml order-service/
 RUN mvn dependency:go-offline -B
 
 COPY shopease-common/src shopease-common/src
-COPY product-service/src product-service/src
+COPY order-service/src order-service/src
 
-RUN mvn clean package -pl product-service -am -DskipTests -B
+RUN mvn clean package -pl order-service -am -DskipTests -B
 
 
 # ============================================
@@ -25,7 +25,7 @@ RUN mvn clean package -pl product-service -am -DskipTests -B
 # ============================================
 FROM eclipse-temurin:21.0.5_11-jre-alpine AS runtime
 
-LABEL org.opencontainers.image.title="shopease-product-service" \
+LABEL org.opencontainers.image.title="shopease-order-service" \
       org.opencontainers.image.authors="Sanket Mule" \
       org.opencontainers.image.environment="development"
 
@@ -33,11 +33,11 @@ WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-COPY --from=build --chown=appuser:appgroup /app/product-service/target/product-service-*.jar /app/app.jar
+COPY --from=build --chown=appuser:appgroup /app/order-service/target/order-service-*.jar /app/app.jar
 
 USER appuser
 
-EXPOSE 8081
+EXPOSE 8083
 
 ENTRYPOINT ["java", \
   "-XX:MaxRAMPercentage=75.0", \

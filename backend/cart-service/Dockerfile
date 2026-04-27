@@ -5,7 +5,7 @@ FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 
 WORKDIR /app
 
-COPY pom.xml .
+COPY pom.xml /app/
 COPY shopease-common/pom.xml shopease-common/
 COPY auth-service/pom.xml auth-service/
 COPY product-service/pom.xml product-service/
@@ -15,17 +15,16 @@ COPY order-service/pom.xml order-service/
 RUN mvn dependency:go-offline -B
 
 COPY shopease-common/src shopease-common/src
-COPY product-service/src product-service/src
+COPY cart-service/src cart-service/src
 
-RUN mvn clean package -pl product-service -am -DskipTests -B
-
+RUN mvn clean package -pl cart-service -am -DskipTests -B
 
 # ============================================
 # Stage 2: Runtime
 # ============================================
 FROM eclipse-temurin:21.0.5_11-jre-alpine AS runtime
 
-LABEL org.opencontainers.image.title="shopease-product-service" \
+LABEL org.opencontainers.image.title="shopease-cart-service" \
       org.opencontainers.image.authors="Sanket Mule" \
       org.opencontainers.image.environment="development"
 
@@ -33,14 +32,15 @@ WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-COPY --from=build --chown=appuser:appgroup /app/product-service/target/product-service-*.jar /app/app.jar
+COPY --from=build --chown=appuser:appgroup /app/cart-service/target/cart-service-*.jar /app/app.jar
 
 USER appuser
 
-EXPOSE 8081
+EXPOSE 8082
 
 ENTRYPOINT ["java", \
   "-XX:MaxRAMPercentage=75.0", \
   "-XX:InitialRAMPercentage=50.0", \
   "-XX:+ExitOnOutOfMemoryError", \
   "-jar", "/app/app.jar"]
+  
