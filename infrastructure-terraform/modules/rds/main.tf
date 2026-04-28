@@ -54,7 +54,7 @@ resource "aws_rds_cluster" "aurora" {
   db_subnet_group_name   = aws_db_subnet_group.aurora.name
   vpc_security_group_ids = [aws_security_group.aurora.id]
 
-  storage_encrypted = true
+  storage_encrypted   = true
   deletion_protection = var.deletion_protection
 
   skip_final_snapshot       = var.environment == "dev" || var.environment == "development" ? true : false
