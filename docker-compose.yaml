@@ -13,7 +13,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
       SPRING_DATASOURCE_USERNAME: shopease_admin
       SPRING_DATASOURCE_PASSWORD: Adminuser123
       APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
@@ -36,7 +36,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
       SPRING_DATASOURCE_USERNAME: shopease_admin
       SPRING_DATASOURCE_PASSWORD: Adminuser123
     healthcheck:
@@ -54,7 +54,7 @@ services:
     ports:
       - "8082:8082"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
       SPRING_DATASOURCE_USERNAME: shopease_admin
       SPRING_DATASOURCE_PASSWORD: Adminuser123
       APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
@@ -74,7 +74,7 @@ services:
     ports:
       - "8083:8083"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-db-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+      SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
       SPRING_DATASOURCE_USERNAME: shopease_admin
       SPRING_DATASOURCE_PASSWORD: Adminuser123
       APP_JWT_SECRET: ShopEaseSecretKey2026SuperSecureLongKeyForJWTTokenGeneration1234567890
