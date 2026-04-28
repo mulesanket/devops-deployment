@@ -104,7 +104,7 @@ module "welcome_email_lambda" {
   source             = "../../modules/lambda"
   project_name       = var.project_name
   environment        = var.environment
-  lambda_source_path = "${path.module}/../../../../backend/lambda/welcome_email.py"
+  lambda_source_path = "${path.module}/../../../application-backend/lambda/welcome_email.py"
   sqs_queue_arn      = module.signup_sqs.queue_arn
   sender_email       = var.ses_sender_email
 
