@@ -42,6 +42,7 @@ spec:
             port: 8081
           failureThreshold: 30
           periodSeconds: 5
+          timeoutSeconds: 3
 
         readinessProbe:
           httpGet:
@@ -56,7 +57,7 @@ spec:
           httpGet:
             path: /api/products/health
             port: 8081
-          initialDelaySeconds: 10
+          initialDelaySeconds: 60
           periodSeconds: 30
           timeoutSeconds: 3
           failureThreshold: 3
