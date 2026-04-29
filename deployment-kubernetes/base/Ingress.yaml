@@ -34,7 +34,7 @@ spec:
             port:
               number: 8082
       - path: /api/orders
-      - pathType: Prefix
+        pathType: Prefix
         backend:
           service:
             name: order-service
