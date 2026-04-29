@@ -1,4 +1,4 @@
-const CART_API = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8082/api`
+const CART_API = import.meta.env.VITE_API_BASE_URL || '/api'
 
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('token')
