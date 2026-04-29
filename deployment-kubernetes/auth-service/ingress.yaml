@@ -1,0 +1,38 @@
+# ============================================
+# Shopease: auth-service ingress
+# Author: Sanket Mule
+# Shares ALB via group.name=shopease-webapp
+# ============================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-service-ingress
+  namespace: shopease-webapp-development
+  annotations:
+    # ---- Shared ALB (IngressGroup) ----
+    alb.ingress.kubernetes.io/group.name: shopease-webapp
+    alb.ingress.kubernetes.io/group.order: "10"
+    alb.ingress.kubernetes.io/load-balancer-name: shopease-webapp-alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+
+    # ---- Per-service health check ----
+    alb.ingress.kubernetes.io/healthcheck-path: /api/auth/health
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/success-codes: "200"
+
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 80
