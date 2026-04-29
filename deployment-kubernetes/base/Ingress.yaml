@@ -13,21 +13,21 @@ spec:
   - http:
       paths:
       - path: /api/auth
-        pathType: ImplementationSpecific
+        pathType: Prefix
         backend:
           service:
             name: auth-service
             port:
               number: 8080
       - path: /api/products
-        pathType: ImplementationSpecific
+        pathType: Prefix
         backend:
           service:
             name: product-service
             port:
               number: 8081
       - path: /api/cart
-        pathType: ImplementationSpecific
+        pathType: Prefix
         backend:
           service:
             name: cart-service
