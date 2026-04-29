@@ -1,14 +1,6 @@
 
-data "aws_eks_cluster" "eks_control_plane" {
-  name = aws_eks_cluster.eks_control_plane.name
-}
-
-data "aws_eks_cluster_auth" "eks_control_plane" {
-  name = aws_eks_cluster.eks_control_plane.name
-}
-
 resource "aws_iam_openid_connect_provider" "eks_control_plane" {
-  url            = data.aws_eks_cluster.eks_control_plane.identity[0].oidc[0].issuer
+  url            = aws_eks_cluster.eks_control_plane.identity[0].oidc[0].issuer
   client_id_list = ["sts.amazonaws.com"]
 
   tags = {

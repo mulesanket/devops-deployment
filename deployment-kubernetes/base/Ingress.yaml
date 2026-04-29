@@ -21,25 +21,25 @@ spec:
           service:
             name: auth-service
             port:
-              number: 8080
+              number: 80
       - path: /api/products
         pathType: Prefix
         backend:
           service:
             name: product-service
             port:
-              number: 8081
+              number: 80
       - path: /api/cart
         pathType: Prefix
         backend:
           service:
             name: cart-service
             port:
-              number: 8082
+              number: 80
       - path: /api/orders
         pathType: Prefix
         backend:
           service:
             name: order-service
             port:
-              number: 8083
+              number: 80
