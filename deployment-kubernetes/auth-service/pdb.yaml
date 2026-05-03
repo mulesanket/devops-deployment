@@ -1,0 +1,22 @@
+# ============================================
+# Shopease: auth-service PodDisruptionBudget
+# Author: Sanket Mule
+# ============================================
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service-pdb
+  namespace: shopease-webapp-development
+  labels:
+    app: auth-service-deployment
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: shopease-webapp
+    app.kubernetes.io/managed-by: kubectl
+
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: auth-service-deployment
+  unhealthyPodEvictionPolicy: IfHealthyBudget
