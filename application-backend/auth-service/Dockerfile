@@ -31,7 +31,7 @@ LABEL org.opencontainers.image.title="shopease-auth-service" \
 
 WORKDIR /app
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN addgroup -g 10001 -S appgroup && adduser -u 10001 -S appuser -G appgroup
 
 COPY --from=build --chown=appuser:appgroup /app/auth-service/target/auth-service-*.jar /app/app.jar
 
