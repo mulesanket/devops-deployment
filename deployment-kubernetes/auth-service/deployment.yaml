@@ -16,50 +16,75 @@ spec:
   selector:
     matchLabels:
       app: auth-service-deployment
+
   template:
     metadata:
       labels:
         app: auth-service-deployment
+
     spec:
+      # Pod-level securityContext
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
       containers:
-      - name: auth-service-workload
-        image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:v1
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8080
+        - name: auth-service-workload
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:v1
+          imagePullPolicy: Always
 
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          limits:
-            cpu: 500m
-            memory: 1Gi
+          ports:
+            - containerPort: 8080
 
-        startupProbe:
-          httpGet:
-            path: /api/auth/health
-            port: 8080
-          failureThreshold: 30
-          periodSeconds: 5
-          timeoutSeconds: 3
+          # Container-level securityContext
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
 
-        readinessProbe:
-          httpGet:
-            path: /api/auth/health
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 30
-          timeoutSeconds: 3
-          failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
 
-        livenessProbe:
-          httpGet:
-            path: /api/auth/health
-            port: 8080
-          initialDelaySeconds: 60
-          periodSeconds: 30
-          timeoutSeconds: 3
-          failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
 
+          startupProbe:
+            httpGet:
+              path: /api/auth/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
 
+          readinessProbe:
+            httpGet:
+              path: /api/auth/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/auth/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
