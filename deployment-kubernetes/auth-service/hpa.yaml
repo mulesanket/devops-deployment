@@ -1,0 +1,63 @@
+# ============================================
+# Shopease: auth-service HorizontalPodAutoscaler
+# Author: Sanket Mule
+# Scales pods based on CPU/Memory utilization
+# ============================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-service-hpa
+  namespace: shopease-webapp-development
+  labels:
+    app: auth-service-hpa
+
+spec:
+  # ---- What to scale ----
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service-deployment   # must match the Deployment's metadata.name
+
+  # ---- Replica boundaries ----
+  minReplicas: 2                    # never go below 2 (HA: survives 1 pod/AZ failure)
+  maxReplicas: 10                   # cap to control cost during traffic spikes
+
+  # ---- Scaling triggers (multiple metrics = OR logic, scale if ANY breaches) ----
+  metrics:
+    # Scale up when avg CPU across pods > 70% of requested CPU (250m → 175m)
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Also watch memory — JVM apps can be memory-bound before CPU-bound
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # ---- Scaling behavior (smooths out flapping) ----
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30      # react quickly to load spikes
+      policies:
+        - type: Percent
+          value: 100                      # can double the pods in one step
+          periodSeconds: 60
+        - type: Pods
+          value: 4                        # OR add 4 pods at once (whichever is larger)
+          periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      stabilizationWindowSeconds: 300     # wait 5 min of low load before scaling down
+      policies:
+        - type: Percent
+          value: 50                       # remove at most 50% of pods per minute
+          periodSeconds: 60
+      selectPolicy: Max
