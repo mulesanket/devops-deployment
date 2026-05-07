@@ -1,0 +1,17 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cart-service-pdb
+  namespace: shopease-webapp-development
+  labels:
+    app: cart-service-deployment
+    app.kubernetes.io/name: cart-service
+    app.kubernetes.io/part-of: shopease-webapp
+    app.kubernetes.io/managed-by: kubectl
+
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: cart-service-deployment
+  unhealthyPodEvictionPolicy: IfHealthyBudget
