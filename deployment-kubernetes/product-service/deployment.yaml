@@ -65,8 +65,8 @@ spec:
 
       containers:
         - name: product-service-workload
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/product-service:v1
-          imagePullPolicy: Always
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/product-service:1.1.0
+          imagePullPolicy: IfNotPresent
 
           ports:
             - containerPort: 8081

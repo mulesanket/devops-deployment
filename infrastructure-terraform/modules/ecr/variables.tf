@@ -15,9 +15,9 @@ variable "repository_names" {
 }
 
 variable "image_tag_mutability" {
-  description = "Tag mutability setting (MUTABLE or IMMUTABLE)"
+  description = "Tag mutability setting (MUTABLE or IMMUTABLE). IMMUTABLE prevents tag overwrites and is required for production reproducibility."
   type        = string
-  default     = "MUTABLE"
+  default     = "IMMUTABLE"
 }
 
 variable "max_image_count" {
