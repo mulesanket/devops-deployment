@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+  namespace: shopease-webapp-development
+  labels:
+    app: order-service-deployment
+    app.kubernetes.io/name: order-service
+    app.kubernetes.io/part-of: shopease-webapp
+
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+  SPRING_DATASOURCE_USERNAME: shopease_admin
+
+  APP_CART_SERVICE_URL: http://cart-service.shopease-webapp-development.svc.cluster.local:80

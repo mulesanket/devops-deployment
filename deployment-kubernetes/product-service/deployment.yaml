@@ -71,6 +71,12 @@ spec:
           ports:
             - containerPort: 8081
 
+          envFrom:
+            - configMapRef:
+                name: product-service-config
+            - secretRef:
+                name: product-service-secret
+
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

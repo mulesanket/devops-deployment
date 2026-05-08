@@ -71,6 +71,12 @@ spec:
           ports:
             - containerPort: 8082
 
+          envFrom:
+            - configMapRef:
+                name: cart-service-config
+            - secretRef:
+                name: cart-service-secret
+
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

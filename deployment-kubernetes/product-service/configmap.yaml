@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: product-service-config
+  namespace: shopease-webapp-development
+  labels:
+    app: product-service-deployment
+    app.kubernetes.io/name: product-service
+    app.kubernetes.io/part-of: shopease-webapp
+
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://shopease-webapp-development-instance-1.cjuoiu4oi4x7.ap-south-1.rds.amazonaws.com:5432/shopease
+  SPRING_DATASOURCE_USERNAME: shopease_admin

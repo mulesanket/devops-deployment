@@ -71,6 +71,12 @@ spec:
           ports:
             - containerPort: 8080
 
+          envFrom:
+            - configMapRef:
+                name: auth-service-config
+            - secretRef:
+                name: auth-service-secret
+
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
