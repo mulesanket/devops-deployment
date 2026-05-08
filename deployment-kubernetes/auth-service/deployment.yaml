@@ -32,9 +32,9 @@ spec:
 
       securityContext:
         runAsNonRoot: true
-        runAsUser: 100
-        runAsGroup: 101
-        fsGroup: 101
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
 
