@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cart-service-deployment
@@ -28,6 +28,9 @@ spec:
         app: cart-service-deployment
 
     spec:
+      serviceAccountName: cart-service-sa
+      automountServiceAccountToken: true
+
       priorityClassName: shopease-high
 
       securityContext:

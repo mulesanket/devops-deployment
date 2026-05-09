@@ -1,4 +1,4 @@
-apiVersion: apps/v1
+﻿apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: auth-service-deployment
@@ -28,6 +28,9 @@ spec:
         app: auth-service-deployment
 
     spec:
+      serviceAccountName: auth-service-sa
+      automountServiceAccountToken: true
+
       priorityClassName: shopease-critical
 
       securityContext:
