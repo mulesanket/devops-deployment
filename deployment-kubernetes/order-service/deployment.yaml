@@ -65,7 +65,7 @@ spec:
 
       containers:
         - name: order-service-workload
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/order-service:1.1.0
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-order-service:1.1.0
           imagePullPolicy: IfNotPresent
 
           ports:

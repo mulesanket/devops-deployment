@@ -65,7 +65,7 @@ spec:
 
       containers:
         - name: cart-service-workload
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/cart-service:1.1.0
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-cart-service:1.1.0
           imagePullPolicy: IfNotPresent
 
           ports:
