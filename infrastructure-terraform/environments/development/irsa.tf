@@ -1,26 +1,7 @@
-########################################
-# IRSA - IAM Roles for Kubernetes ServiceAccounts
-#
-# Each microservice that needs AWS access gets its own IAM role
-# bound to a specific Kubernetes ServiceAccount via the cluster's
-# OIDC provider. Pods assume the role via STS:AssumeRoleWithWebIdentity
-# at runtime — no static AWS credentials anywhere.
-#
-# Today only auth-service needs AWS access (SNS:Publish for signup
-# events). The other services use bare K8s ServiceAccounts (created
-# in deployment-kubernetes/<svc>/service-account.yaml) with no AWS
-# permissions — better than the cluster's `default` ServiceAccount.
-########################################
-
-locals {
+﻿locals {
   k8s_namespace = "shopease-webapp-development"
 }
 
-# ──────────────────────────────────────────────────────────
-# auth-service: needs SNS:Publish on the signup topic
-# ──────────────────────────────────────────────────────────
-
-# Least-privilege IAM policy: publish to ONE specific SNS topic, nothing else.
 resource "aws_iam_policy" "auth_service_sns_publish" {
   name        = "${var.project_name}-${var.environment}-auth-service-sns-publish"
   description = "Allow auth-service to publish signup events to the signup SNS topic."

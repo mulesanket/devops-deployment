@@ -1,16 +1,4 @@
-########################################
-# IRSA Module - IAM Role for ServiceAccount
-#
-# Creates an IAM role whose trust policy allows ONLY a specific
-# Kubernetes ServiceAccount (in a specific namespace, in a specific
-# EKS cluster) to assume it via STS:AssumeRoleWithWebIdentity.
-#
-# The :sub condition cryptographically binds this role to one and
-# only one pod identity — even a leaked token from another pod or
-# namespace cannot assume this role.
-########################################
-
-resource "aws_iam_role" "this" {
+﻿resource "aws_iam_role" "this" {
   name = var.role_name
 
   assume_role_policy = jsonencode({
@@ -42,9 +30,8 @@ resource "aws_iam_role" "this" {
   )
 }
 
-# Attach zero or more IAM policies to the role.
 resource "aws_iam_role_policy_attachment" "this" {
-  for_each   = toset(var.policy_arns)
+  count      = length(var.policy_arns)
   role       = aws_iam_role.this.name
-  policy_arn = each.value
+  policy_arn = var.policy_arns[count.index]
 }

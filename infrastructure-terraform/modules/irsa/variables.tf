@@ -1,21 +1,15 @@
-########################################
-# IRSA Module - Variables
-# Reusable module: creates ONE IAM role bound to ONE
-# Kubernetes ServiceAccount via the EKS OIDC provider.
-########################################
-
-variable "role_name" {
+﻿variable "role_name" {
   description = "Name of the IAM role to create (must be unique per AWS account)."
   type        = string
 }
 
 variable "oidc_provider_arn" {
-  description = "ARN of the EKS cluster's IAM OIDC provider (from EKS module)."
+  description = "ARN of the EKS cluster's IAM OIDC provider."
   type        = string
 }
 
 variable "oidc_provider_url" {
-  description = "URL of the EKS cluster's IAM OIDC provider WITHOUT the https:// prefix (e.g. oidc.eks.ap-south-1.amazonaws.com/id/ABC...)."
+  description = "URL of the EKS cluster's IAM OIDC provider WITHOUT the https:// prefix."
   type        = string
 }
 
@@ -30,7 +24,7 @@ variable "service_account_name" {
 }
 
 variable "policy_arns" {
-  description = "List of IAM policy ARNs to attach to the role. Pass an empty list for a role with no permissions."
+  description = "List of IAM policy ARNs to attach to the role."
   type        = list(string)
   default     = []
 }
