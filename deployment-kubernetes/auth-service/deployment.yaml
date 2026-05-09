@@ -65,7 +65,7 @@ spec:
 
       containers:
         - name: auth-service-workload
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/auth-service:1.1.0
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-auth-service:1.1.0
           imagePullPolicy: IfNotPresent
 
           ports:
