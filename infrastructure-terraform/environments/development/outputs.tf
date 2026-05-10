@@ -1,4 +1,4 @@
-
+﻿
 output "frontend_bucket_id" {
   value = module.s3_frontend.frontend_bucket_id
 }
@@ -20,9 +20,14 @@ output "auth_service_irsa_role_arn" {
 output "secrets_manager_arns" {
   description = "ARNs of AWS Secrets Manager secrets per service. Used by ESO IAM policy in Step 2."
   value = {
-    auth_service    = aws_secretsmanager_secret.auth_service.arn
-    product_service = aws_secretsmanager_secret.product_service.arn
-    cart_service    = aws_secretsmanager_secret.cart_service.arn
-    order_service   = aws_secretsmanager_secret.order_service.arn
+    auth_service    = module.auth_service_secret.arn
+    product_service = module.product_service_secret.arn
+    cart_service    = module.cart_service_secret.arn
+    order_service   = module.order_service_secret.arn
   }
+}
+
+output "app_secrets_kms_key_arn" {
+  description = "KMS CMK used to encrypt application secrets. ESO IAM role needs kms:Decrypt on this key."
+  value       = module.app_secrets_kms.key_arn
 }
