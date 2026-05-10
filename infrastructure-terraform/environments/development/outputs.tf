@@ -31,3 +31,8 @@ output "app_secrets_kms_key_arn" {
   description = "KMS CMK used to encrypt application secrets. ESO IAM role needs kms:Decrypt on this key."
   value       = module.app_secrets_kms.key_arn
 }
+
+output "external_secrets_irsa_role_arn" {
+  description = "IAM role ARN for the External Secrets Operator. Annotate the ESO ServiceAccount with eks.amazonaws.com/role-arn=<this> in Step 4."
+  value       = module.external_secrets_irsa.role_arn
+}

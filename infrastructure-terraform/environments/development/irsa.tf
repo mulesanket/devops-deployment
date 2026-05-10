@@ -2,20 +2,19 @@
   k8s_namespace = "shopease-webapp-development"
 }
 
+data "aws_iam_policy_document" "auth_service_sns_publish" {
+  statement {
+    sid       = "AuthServicePublishSignupEvents"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = [module.signup_sns.topic_arn]
+  }
+}
+
 resource "aws_iam_policy" "auth_service_sns_publish" {
   name        = "${var.project_name}-${var.environment}-auth-service-sns-publish"
   description = "Allow auth-service to publish signup events to the signup SNS topic."
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "sns:Publish"
-        Resource = module.signup_sns.topic_arn
-      }
-    ]
-  })
+  policy      = data.aws_iam_policy_document.auth_service_sns_publish.json
 }
 
 module "auth_service_irsa" {
