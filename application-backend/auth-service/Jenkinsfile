@@ -1,0 +1,18 @@
+pipeline {
+    agent any 
+
+    stages {
+        stage('Hello') {
+            steps {
+                echo 'Hello World from Jenkins!'
+            }
+        }
+        
+        stage('Check Version') {
+            steps {
+                sh 'java -version'
+                echo 'Build complete.'
+            }
+        }
+    }
+}
