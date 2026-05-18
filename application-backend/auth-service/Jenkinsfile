@@ -7,16 +7,16 @@ pipeline {
         timestamps()                             
         disableConcurrentBuilds()                
         ansiColor('xterm')                       
-        buildDiscarder(logRotator(numToKeepStr: '20', daysToKeepStr: '30'))
+        buildDiscarder(logRotator(numToKeepStr: '3', daysToKeepStr: '30'))
     }
 
-    parameters {
-        booleanParam(
-            name: 'FORCE_BUILD',
-            defaultValue: false,
-            description: 'Skip change-detection and run the full pipeline regardless of diff.'
-        )
-    }
+    // parameters {
+    //     booleanParam(
+    //         name: 'FORCE_BUILD',
+    //         defaultValue: false,
+    //         description: 'Skip change-detection and run the full pipeline regardless of diff.'
+    //     )
+    // }
 
     environment {
         SERVICE_NAME   = 'auth-service'
@@ -26,15 +26,14 @@ pipeline {
     }
 
     stages {
-        stage('Setup & Environment') {
+
+        stage ('Setup & Environment') {
             steps {
                 script {
                     env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.IMAGE_TAG = "${env.GIT_SHA}"
                     env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
-                }
-
-                sh '''
+                }                sh '''
                     echo "-- Build context ------------------------------"
                     echo "Service       : ${SERVICE_NAME}"
                     echo "Branch        : ${BRANCH_NAME}"
@@ -44,8 +43,33 @@ pipeline {
                 '''
             }
         }
+
+        stage ('Secret Scan') {
+            steps {
+                sh '''
+                    echo "-- Running gitleaks ---------------------------"
+                    gitleaks version
+                    gitleaks detect \
+                        --source="${WORKSPACE}" \
+                        --no-git \
+                        --report-format=json \
+                        --report-path="${WORKSPACE}/gitleaks-report.json" \
+                        --redact \
+                        --verbose \
+                        --exit-code=1
+                    echo "No secrets detected."
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'gitleaks-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+            }
+        }
     }
-    
+
     post {
         always {
             echo "Build #${BUILD_NUMBER} finished with status: ${currentBuild.currentResult}"
