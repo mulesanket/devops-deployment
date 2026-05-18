@@ -1,18 +1,53 @@
+
 pipeline {
-    agent any 
+    agent any
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')      
+        timestamps()                             
+        disableConcurrentBuilds()                
+        ansiColor('xterm')                       
+        buildDiscarder(logRotator(numToKeepStr: '20', daysToKeepStr: '30'))
+    }
+
+    parameters {
+        booleanParam(
+            name: 'FORCE_BUILD',
+            defaultValue: false,
+            description: 'Skip change-detection and run the full pipeline regardless of diff.'
+        )
+    }
+
+    environment {
+        SERVICE_NAME   = 'auth-service'
+        AWS_REGION     = 'ap-south-1'
+        AWS_ACCOUNT_ID = '483829975256'
+        ECR_REPO       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/shopease-webapp-development-${SERVICE_NAME}"  
+    }
 
     stages {
-        stage('Hello') {
+        stage('Setup & Environment') {
             steps {
-                echo 'Hello World from Jenkins!'
+                script {
+                    env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = "${env.GIT_SHA}"
+                    env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
+                }
+
+                sh '''
+                    echo "-- Build context ------------------------------"
+                    echo "Service       : ${SERVICE_NAME}"
+                    echo "Branch        : ${BRANCH_NAME}"
+                    echo "Git SHA       : ${GIT_SHA}"
+                    echo "Image URI     : ${IMAGE_URI}"
+                    echo "Workspace     : ${WORKSPACE}"
+                '''
             }
         }
-        
-        stage('Check Version') {
-            steps {
-                sh 'java -version'
-                echo 'Build complete.'
-            }
+
+    post {
+        always {
+            echo "Build #${BUILD_NUMBER} finished with status: ${currentBuild.currentResult}"
         }
     }
 }
