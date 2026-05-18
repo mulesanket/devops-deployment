@@ -45,6 +45,7 @@ pipeline {
             }
         }
     }
+    
     post {
         always {
             echo "Build #${BUILD_NUMBER} finished with status: ${currentBuild.currentResult}"
