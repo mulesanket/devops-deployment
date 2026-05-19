@@ -10,19 +10,19 @@ def stageHeader(String name) {
 """)
 }
 
-def success(String message) {
+def logSuccess(String message) {
     echo color('1;32', "SUCCESS: ${message}")
 }
 
-def warn(String message) {
+def logWarning(String message) {
     echo color('1;33', "WARNING: ${message}")
 }
 
-def info(String message) {
+def lognfo(String message) {
     echo color('1;34', "INFO: ${message}")
 }
 
-def errorMsg(String message) {
+def logErrorMsg(String message) {
     echo color('1;31', "ERROR: ${message}")
 }
 
@@ -55,13 +55,13 @@ pipeline {
                     env.IMAGE_TAG = "${env.GIT_SHA}"
                     env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
 
-                    info("Service   : ${env.SERVICE_NAME}")
-                    info("Branch    : ${env.BRANCH_NAME}")
-                    info("Git SHA   : ${env.GIT_SHA}")
-                    info("Image URI : ${env.IMAGE_URI}")
-                    info("Workspace : ${env.WORKSPACE}")
+                    logInfo("Service   : ${env.SERVICE_NAME}")
+                    logInfo("Branch    : ${env.BRANCH_NAME}")
+                    logInfo("Git SHA   : ${env.GIT_SHA}")
+                    logInfo("Image URI : ${env.IMAGE_URI}")
+                    logInfo("Workspace : ${env.WORKSPACE}")
 
-                    success('Setup & Environment completed')
+                    logSuccess('Setup & Environment completed')
                 }
             }
         }
@@ -98,7 +98,7 @@ pipeline {
             post {
                 always {
                     script {
-                        warn('Archiving gitleaks report if available')
+                        logWarning('Archiving gitleaks report if available')
                     }
 
                     archiveArtifacts artifacts: 'gitleaks-report.json',
@@ -108,7 +108,7 @@ pipeline {
 
                 success {
                     script {
-                        success('Secret Scan stage completed')
+                        logSuccess('Secret Scan stage completed')
                     }
                 }                failure {
                     script {
@@ -150,7 +150,7 @@ pipeline {
             post {
                 always {
                     script {
-                        warn('Archiving trivy fs report if available')
+                        logWarning('Archiving trivy fs report if available')
                     }
 
                     archiveArtifacts artifacts: 'trivy-fs-report.json',
@@ -160,7 +160,7 @@ pipeline {
 
                 success {
                     script {
-                        success('Dependency Vulnerability Scan stage completed')
+                        logSuccess('Dependency Vulnerability Scan stage completed')
                     }
                 }
 
@@ -176,7 +176,7 @@ pipeline {
     post {
         success {
             script {
-                success("Pipeline completed successfully. Build #${env.BUILD_NUMBER}")
+                logSuccess("Pipeline completed successfully. Build #${env.BUILD_NUMBER}")
             }
         }
 
@@ -188,13 +188,13 @@ pipeline {
 
         unstable {
             script {
-                warn("Pipeline unstable. Build #${env.BUILD_NUMBER}")
+                logWarning("Pipeline unstable. Build #${env.BUILD_NUMBER}")
             }
         }
 
         always {
             script {
-                info("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}")
+                logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}")
             }
         }
     }
