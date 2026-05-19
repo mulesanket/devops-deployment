@@ -187,24 +187,18 @@ pipeline {
                         exit 1
                     fi
 
-                    docker --version
-
-                    echo ""
+                    docker --version                    echo ""
                     echo "-- Building image -----------------------------"
                     echo "Dockerfile : application-backend/auth-service/Dockerfile"
                     echo "Context    : application-backend/"
-                    echo "Tag (SHA)  : ${IMAGE_URI}"
-                    echo "Tag (latest): ${ECR_REPO}:latest"
-                    echo ""
+                    echo "Tag        : ${IMAGE_URI}"
+                    echo ""                    
 
-                    # --pull   -> always check for a newer base image (eclipse-temurin:21-jre-alpine)
-                    # --no-cache=false (default) -> reuse layer cache when possible (faster rebuilds)
-                    # Two -t flags -> tag the same image twice in one build
                     docker build \
                         --pull \
+                        --progress=plain \
                         --file application-backend/auth-service/Dockerfile \
                         --tag "${IMAGE_URI}" \
-                        --tag "${ECR_REPO}:latest" \
                         --label "git.sha=${GIT_SHA}" \
                         --label "git.branch=${BRANCH_NAME}" \
                         --label "build.number=${BUILD_NUMBER}" \

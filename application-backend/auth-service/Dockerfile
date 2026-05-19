@@ -12,12 +12,12 @@ COPY product-service/pom.xml product-service/
 COPY cart-service/pom.xml cart-service/
 COPY order-service/pom.xml order-service/
 
-RUN mvn dependency:go-offline -B
+RUN mvn dependency:go-offline -B -ntp
 
 COPY shopease-common/src shopease-common/src
 COPY auth-service/src auth-service/src
 
-RUN mvn clean package -pl auth-service -am -DskipTests -B
+RUN mvn clean package -pl auth-service -am -DskipTests -B -ntp
 
 
 # ============================================
