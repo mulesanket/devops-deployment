@@ -21,14 +21,22 @@
         <java.version>21</java.version>
         <jjwt.version>0.12.6</jjwt.version>
         <!-- Bumped from 2.25.60 (Jun 2024) -> 2.31.0 to clear known CVEs. -->
-        <aws.sdk.version>2.31.0</aws.sdk.version>
-        <!--
+        <aws.sdk.version>2.31.0</aws.sdk.version>        <!--
             Override Spring Boot 3.5.14's managed tomcat.version (10.1.54)
             to 10.1.55 to clear: CVE-2026-41293, 41284, 42498, 43512, 43513.
             Remove this override once Spring Boot ships >= 10.1.55.
             Tracked: 2026-05-19.
         -->
         <tomcat.version>10.1.55</tomcat.version>
+        <!--
+            Override Spring Boot 3.5.14's managed netty.version (4.1.132.Final)
+            to 4.1.133.Final to clear: CVE-2026-42583, 42584, 42587 in
+            netty-codec, netty-codec-http, netty-codec-http2.
+            All Netty 4.1.x artifacts share this single property, so one bump
+            covers every transitive pull. Remove this override once Spring
+            Boot ships >= 4.1.133.Final. Tracked: 2026-05-19.
+        -->
+        <netty.version>4.1.133.Final</netty.version>
     </properties><modules>
         <module>shopease-common</module>
         <module>auth-service</module>
