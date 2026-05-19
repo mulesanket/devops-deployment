@@ -123,8 +123,7 @@ pipeline {
                         exit 1
                     fi
 
-                    trivy --version
-
+                    trivy --version                    
                     trivy fs \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
@@ -132,7 +131,9 @@ pipeline {
                         --no-progress \
                         --format json \
                         --output "${WORKSPACE}/trivy-fs-report.json" \
-                        application-backend/auth-service                    echo ""
+                        application-backend/auth-service
+
+                    echo ""
                     echo "-- Findings (HIGH / CRITICAL only) ------------"
                     trivy convert \
                         --format table \
@@ -179,12 +180,12 @@ pipeline {
                     if ! command -v docker >/dev/null 2>&1; then
                         echo "\\033[1;31mERROR: docker is not installed on Jenkins agent.\\033[0m"
                         exit 1
-                    fi
-
-                    if ! docker info >/dev/null 2>&1; then
+                    fi                    if ! docker info >/dev/null 2>&1; then
                         echo "\\033[1;31mERROR: cannot talk to docker daemon. Is the jenkins user in the docker group?\\033[0m"
                         exit 1
-                    fi                    docker --version
+                    fi
+
+                    docker --version
 
                     echo ""
                     echo "-- Building image -----------------------------"
@@ -243,7 +244,6 @@ pipeline {
 
                     trivy --version
 
-                    # 1. Scan the locally-built image. --exit-code 0 
                     trivy image \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
@@ -254,7 +254,6 @@ pipeline {
                         --output "${WORKSPACE}/trivy-image-report.json" \
                         "${IMAGE_URI}"
 
-                    # 2. Render the JSON as a human-readable table.
                     echo ""
                     echo "-- Findings (HIGH / CRITICAL, fixed-only) ----"
                     trivy convert \
@@ -263,7 +262,6 @@ pipeline {
                         --scanners vuln \
                         "${WORKSPACE}/trivy-image-report.json"
 
-                    # 3. Apply the gate.
                     HIGH_CRIT_COUNT=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${WORKSPACE}/trivy-image-report.json")
                     echo ""
                     echo "Total HIGH/CRITICAL (fixed) findings in image: ${HIGH_CRIT_COUNT}"
