@@ -180,7 +180,9 @@ pipeline {
                     if ! command -v docker >/dev/null 2>&1; then
                         echo "\\033[1;31mERROR: docker is not installed on Jenkins agent.\\033[0m"
                         exit 1
-                    fi                    if ! docker info >/dev/null 2>&1; then
+                    fi
+
+                    if ! docker info >/dev/null 2>&1; then
                         echo "\\033[1;31mERROR: cannot talk to docker daemon. Is the jenkins user in the docker group?\\033[0m"
                         exit 1
                     fi
