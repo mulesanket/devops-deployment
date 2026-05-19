@@ -233,9 +233,7 @@ pipeline {
             steps {
                 script {
                     stageHeader('Image Vulnerability Scan - Trivy image')
-                }
-
-                sh '''
+                }                sh '''
                     set -e
                     echo "-- Running trivy image ------------------------"
 
@@ -245,6 +243,13 @@ pipeline {
                     fi
 
                     trivy --version
+
+                    # /tmp on this host is a 2GB tmpfs (RAM-backed). Trivy
+                    # extracts image layers + downloads its Java DB into TMPDIR,
+                    # which can exceed 2GB for a Spring Boot image. Redirect to
+                    # a workspace-local scratch dir on real disk.
+                    export TMPDIR="${WORKSPACE}/.trivy-tmp"
+                    mkdir -p "${TMPDIR}"
 
                     trivy image \
                         --scanners vuln \
@@ -276,9 +281,7 @@ pipeline {
 
                     echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                 '''
-            }
-
-            post {
+            }            post {
                 always {
                     script {
                         logWarning('Archiving trivy image report if available')
@@ -287,6 +290,9 @@ pipeline {
                     archiveArtifacts artifacts: 'trivy-image-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
+
+                    // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
+                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                 }
                 success {
                     script {
