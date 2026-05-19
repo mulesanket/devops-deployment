@@ -5,8 +5,12 @@
     <modelVersion>4.0.0</modelVersion>    <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-  
-        <version>3.3.13</version>
+        <!--
+            Bumped from 3.3.13 -> 3.5.14 to pick up CVE fixes that are only
+            being patched on the 3.5.x line (spring-boot, spring-security,
+            spring-core, tomcat-embed-core).
+        -->
+        <version>3.5.14</version>
         <relativePath/>
     </parent>
 
@@ -52,13 +56,23 @@
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-jackson</artifactId>
                 <version>${jjwt.version}</version>
-            </dependency>
-
-            <!-- AWS SDK -->
+            </dependency>            <!-- AWS SDK -->
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>sns</artifactId>
                 <version>${aws.sdk.version}</version>
+            </dependency>
+
+            <!--
+                PostgreSQL JDBC override.
+                Spring Boot 3.5.14 ships 42.7.7 which has CVE-2026-42198
+                (client-side DoS). Pin to 42.7.11 explicitly.
+                Re-evaluate when Spring Boot's managed version >= 42.7.11.
+            -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.11</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
