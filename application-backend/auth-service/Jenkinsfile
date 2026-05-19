@@ -18,11 +18,11 @@ def logWarning(String message) {
     echo color('1;33', "WARNING: ${message}")
 }
 
-def lognfo(String message) {
+def logInfo(String message) {
     echo color('1;34', "INFO: ${message}")
 }
 
-def logErrorMsg(String message) {
+def logError(String message) {
     echo color('1;31', "ERROR: ${message}")
 }
 
@@ -105,23 +105,13 @@ pipeline {
                                      allowEmptyArchive: true,
                                      fingerprint: true
                 }
-
-                success {
-                    script {
-                        logSuccess('Secret Scan stage completed')
-                    }
-                }                failure {
-                    script {
-                        logErrorMsg('Secret Scan failed. Secrets may be detected or gitleaks encountered an error')
-                    }
-                }
             }
         }
 
         stage('Dependency Vulnerability Scan') {
             steps {
                 script {
-                    stageHeader('Dependency Vulnerability Scan (Trivy fs)')
+                    stageHeader('Dependency Vulnerability Scan - Trivy fs')
                 }
 
                 sh '''
@@ -157,18 +147,6 @@ pipeline {
                                      allowEmptyArchive: true,
                                      fingerprint: true
                 }
-
-                success {
-                    script {
-                        logSuccess('Dependency Vulnerability Scan stage completed')
-                    }
-                }
-
-                failure {
-                    script {
-                        logErrorMsg('Dependency Vulnerability Scan failed. HIGH/CRITICAL CVEs found or trivy errored')
-                    }
-                }
             }
         }
     }
@@ -182,7 +160,7 @@ pipeline {
 
         failure {
             script {
-                logErrorMsg("Pipeline failed. Build #${env.BUILD_NUMBER}")
+                logError("Pipeline failed. Build #${env.BUILD_NUMBER}")
             }
         }
 
@@ -199,4 +177,3 @@ pipeline {
         }
     }
 }
-
