@@ -17,12 +17,18 @@
     <groupId>com.shopease</groupId>
     <artifactId>shopease-backend</artifactId>
     <version>1.0.0</version>
-    <packaging>pom</packaging>
-    <name>ShopEase Backend - Parent</name>    <properties>
+    <packaging>pom</packaging>    <name>ShopEase Backend - Parent</name>    <properties>
         <java.version>21</java.version>
         <jjwt.version>0.12.6</jjwt.version>
         <!-- Bumped from 2.25.60 (Jun 2024) -> 2.31.0 to clear known CVEs. -->
         <aws.sdk.version>2.31.0</aws.sdk.version>
+        <!--
+            Override Spring Boot 3.5.14's managed tomcat.version (10.1.54)
+            to 10.1.55 to clear: CVE-2026-41293, 41284, 42498, 43512, 43513.
+            Remove this override once Spring Boot ships >= 10.1.55.
+            Tracked: 2026-05-19.
+        -->
+        <tomcat.version>10.1.55</tomcat.version>
     </properties><modules>
         <module>shopease-common</module>
         <module>auth-service</module>
