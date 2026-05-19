@@ -152,7 +152,8 @@ pipeline {
 
                     echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                 '''
-            }            post {
+            }            
+            post {
                 always {
                     script {
                         logWarning('Archiving trivy fs report if available')
