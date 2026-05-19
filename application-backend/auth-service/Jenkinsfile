@@ -286,20 +286,18 @@ pipeline {
 
                     echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                 '''
-            }
-
-            post {
+            }            post {
                 always {
                     script {
                         logWarning('Archiving trivy image report if available')
-
-                        archiveArtifacts artifacts: 'trivy-image-report.json',
-                                         allowEmptyArchive: true,
-                                         fingerprint: true
-
-                        // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
-                        sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                     }
+
+                    archiveArtifacts artifacts: 'trivy-image-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+
+                    // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
+                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                 }
 
                 success {

@@ -23,7 +23,7 @@ RUN mvn clean package -pl auth-service -am -DskipTests -B -ntp
 # ============================================
 # Stage 2: Runtime
 # ============================================
-FROM eclipse-temurin:21.0.5_11-jre-alpine AS runtime
+FROM eclipse-temurin:21-jre-alpine AS runtime
 
 LABEL org.opencontainers.image.title="shopease-auth-service" \
       org.opencontainers.image.authors="Sanket Mule" \
