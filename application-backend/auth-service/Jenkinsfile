@@ -112,9 +112,8 @@ pipeline {
             steps {
                 script {
                     stageHeader('Dependency Vulnerability Scan - Trivy fs')
-                }
-
-                sh '''
+                }                sh '''
+                    set -e
                     echo "-- Running trivy fs ---------------------------"
 
                     if ! command -v trivy >/dev/null 2>&1; then
@@ -127,11 +126,27 @@ pipeline {
                     trivy fs \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
-                        --exit-code 1 \
+                        --exit-code 0 \
                         --no-progress \
                         --format json \
                         --output "${WORKSPACE}/trivy-fs-report.json" \
                         application-backend/auth-service
+
+                    echo ""
+                    echo "-- Findings (HIGH / CRITICAL only) ------------"
+                    trivy convert \
+                        --format table \
+                        --severity HIGH,CRITICAL \
+                        "${WORKSPACE}/trivy-fs-report.json"
+
+                    HIGH_CRIT_COUNT=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${WORKSPACE}/trivy-fs-report.json")
+                    echo ""
+                    echo "Total HIGH/CRITICAL findings: ${HIGH_CRIT_COUNT}"
+
+                    if [ "${HIGH_CRIT_COUNT}" -gt 0 ]; then
+                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities found in dependencies.\\033[0m"
+                        exit 1
+                    fi
 
                     echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                 '''
