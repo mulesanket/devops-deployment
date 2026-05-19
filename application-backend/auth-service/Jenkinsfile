@@ -113,7 +113,7 @@ pipeline {
                 script {
                     stageHeader('Dependency Vulnerability Scan - Trivy fs')
                 }
-                                
+
                 sh '''
                     set -e
                     echo "-- Running trivy fs ---------------------------"
@@ -152,9 +152,7 @@ pipeline {
 
                     echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                 '''
-            }
-
-            post {
+            }            post {
                 always {
                     script {
                         logWarning('Archiving trivy fs report if available')
@@ -163,6 +161,74 @@ pipeline {
                     archiveArtifacts artifacts: 'trivy-fs-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    stageHeader('Docker Build')
+                    logInfo("Building image: ${env.IMAGE_URI}")
+                }
+
+                sh '''
+                    set -e
+                    echo "-- Pre-flight checks --------------------------"
+
+                    if ! command -v docker >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: docker is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    if ! docker info >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: cannot talk to docker daemon. Is the jenkins user in the docker group?\\033[0m"
+                        exit 1
+                    fi
+
+                    docker --version
+
+                    echo ""
+                    echo "-- Building image -----------------------------"
+                    echo "Dockerfile : application-backend/auth-service/Dockerfile"
+                    echo "Context    : application-backend/"
+                    echo "Tag (SHA)  : ${IMAGE_URI}"
+                    echo "Tag (latest): ${ECR_REPO}:latest"
+                    echo ""
+
+                    # --pull   -> always check for a newer base image (eclipse-temurin:21-jre-alpine)
+                    # --no-cache=false (default) -> reuse layer cache when possible (faster rebuilds)
+                    # Two -t flags -> tag the same image twice in one build
+                    docker build \
+                        --pull \
+                        --file application-backend/auth-service/Dockerfile \
+                        --tag "${IMAGE_URI}" \
+                        --tag "${ECR_REPO}:latest" \
+                        --label "git.sha=${GIT_SHA}" \
+                        --label "git.branch=${BRANCH_NAME}" \
+                        --label "build.number=${BUILD_NUMBER}" \
+                        --label "service=${SERVICE_NAME}" \
+                        application-backend
+
+                    echo ""
+                    echo "-- Image details ------------------------------"
+                    docker images "${ECR_REPO}" --format "table {{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}" | head -5
+
+                    echo ""
+                    echo "\\033[1;32mSUCCESS: Image built and tagged.\\033[0m"
+                '''
+            }
+
+            post {
+                success {
+                    script {
+                        logSuccess("Docker Build stage completed: ${env.IMAGE_URI}")
+                    }
+                }
+                failure {
+                    script {
+                        logError('Docker Build failed. Check the build log for the Dockerfile step that errored.')
+                    }
                 }
             }
         }
