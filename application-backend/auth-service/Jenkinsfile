@@ -33,7 +33,9 @@ pipeline {
                     env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.IMAGE_TAG = "${env.GIT_SHA}"
                     env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
-                }                sh '''
+                }   
+
+                sh '''
                     echo "-- Build context ------------------------------"
                     echo "Service       : ${SERVICE_NAME}"
                     echo "Branch        : ${BRANCH_NAME}"
