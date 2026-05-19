@@ -112,7 +112,7 @@ pipeline {
                     }
                 }                failure {
                     script {
-                        errorMsg('Secret Scan failed. Secrets may be detected or gitleaks encountered an error')
+                        logErrorMsg('Secret Scan failed. Secrets may be detected or gitleaks encountered an error')
                     }
                 }
             }
@@ -166,7 +166,7 @@ pipeline {
 
                 failure {
                     script {
-                        errorMsg('Dependency Vulnerability Scan failed. HIGH/CRITICAL CVEs found or trivy errored')
+                        logErrorMsg('Dependency Vulnerability Scan failed. HIGH/CRITICAL CVEs found or trivy errored')
                     }
                 }
             }
@@ -182,7 +182,7 @@ pipeline {
 
         failure {
             script {
-                errorMsg("Pipeline failed. Build #${env.BUILD_NUMBER}")
+                logErrorMsg("Pipeline failed. Build #${env.BUILD_NUMBER}")
             }
         }
 
