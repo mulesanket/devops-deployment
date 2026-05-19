@@ -152,7 +152,8 @@ pipeline {
 
                     echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                 '''
-            }            
+            }
+
             post {
                 always {
                     script {
@@ -214,13 +215,15 @@ pipeline {
                     echo ""
                     echo "\\033[1;32mSUCCESS: Image built and tagged.\\033[0m"
                 '''
-            }           
+            }
+
             post {
                 success {
                     script {
                         logSuccess("Docker Build stage completed: ${env.IMAGE_URI}")
                     }
                 }
+
                 failure {
                     script {
                         logError('Docker Build failed. Check the build log for the Dockerfile step that errored.')
@@ -230,7 +233,8 @@ pipeline {
         }
 
         stage('Image Vulnerability Scan') {
-            steps {                script {
+            steps {
+                script {
                     stageHeader('Image Vulnerability Scan - Trivy image')
                 }
 
@@ -275,10 +279,12 @@ pipeline {
                     echo "Total HIGH/CRITICAL (fixed) findings in image: ${HIGH_CRIT_COUNT}"
 
                     if [ "${HIGH_CRIT_COUNT}" -gt 0 ]; then
-                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"
+                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"                        
                         echo "Remediation: bump the base image tag in the Dockerfile (eclipse-temurin) and rebuild."
                         exit 1
-                    fi                    echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
+                    fi
+
+                    echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                 '''
             }
 
@@ -286,20 +292,23 @@ pipeline {
                 always {
                     script {
                         logWarning('Archiving trivy image report if available')
+
+                        archiveArtifacts artifacts: 'trivy-image-report.json',
+                                         allowEmptyArchive: true,
+                                         fingerprint: true
+
+                        // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
+                        sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                     }
-
-                    archiveArtifacts artifacts: 'trivy-image-report.json',
-                                     allowEmptyArchive: true,
-                                     fingerprint: true
-
-                    // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
-                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                 }
+
                 success {
                     script {
                         logSuccess('Image Vulnerability Scan stage completed')
                     }
-                }                failure {
+                }
+
+                failure {
                     script {
                         logError('Image Vulnerability Scan failed. Either fixable CVEs were found, or trivy errored.')
                     }
@@ -364,11 +373,13 @@ pipeline {
                         logSuccess("ECR Push completed: ${env.IMAGE_URI}")
                     }
                 }
+
                 failure {
                     script {
                         logError('ECR Push failed. Common causes: IAM perms missing (ecr:PutImage / ecr:UploadLayerPart), repo does not exist, or network egress blocked.')
                     }
                 }
+
                 always {
                     // Always log out of the registry so the auth token in
                     // ~/.docker/config.json does not linger between builds.
@@ -452,4 +463,3 @@ pipeline {
         }
     }
 }
-
