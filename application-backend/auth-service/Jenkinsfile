@@ -112,7 +112,9 @@ pipeline {
             steps {
                 script {
                     stageHeader('Dependency Vulnerability Scan - Trivy fs')
-                }                sh '''
+                }
+                                
+                sh '''
                     set -e
                     echo "-- Running trivy fs ---------------------------"
 
