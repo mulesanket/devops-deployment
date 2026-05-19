@@ -132,13 +132,12 @@ pipeline {
                         --no-progress \
                         --format json \
                         --output "${WORKSPACE}/trivy-fs-report.json" \
-                        application-backend/auth-service
-
-                    echo ""
+                        application-backend/auth-service                    echo ""
                     echo "-- Findings (HIGH / CRITICAL only) ------------"
                     trivy convert \
                         --format table \
                         --severity HIGH,CRITICAL \
+                        --scanners vuln \
                         "${WORKSPACE}/trivy-fs-report.json"
 
                     HIGH_CRIT_COUNT=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${WORKSPACE}/trivy-fs-report.json")
@@ -185,9 +184,9 @@ pipeline {
                     if ! docker info >/dev/null 2>&1; then
                         echo "\\033[1;31mERROR: cannot talk to docker daemon. Is the jenkins user in the docker group?\\033[0m"
                         exit 1
-                    fi
+                    fi                    docker --version
 
-                    docker --version                    echo ""
+                    echo ""
                     echo "-- Building image -----------------------------"
                     echo "Dockerfile : application-backend/auth-service/Dockerfile"
                     echo "Context    : application-backend/"
@@ -212,8 +211,7 @@ pipeline {
                     echo ""
                     echo "\\033[1;32mSUCCESS: Image built and tagged.\\033[0m"
                 '''
-            }
-
+            }           
             post {
                 success {
                     script {
@@ -223,6 +221,81 @@ pipeline {
                 failure {
                     script {
                         logError('Docker Build failed. Check the build log for the Dockerfile step that errored.')
+                    }
+                }
+            }
+        }
+
+        stage('Image Vulnerability Scan') {
+            steps {
+                script {
+                    stageHeader('Image Vulnerability Scan - Trivy image')
+                }
+
+                sh '''
+                    set -e
+                    echo "-- Running trivy image ------------------------"
+
+                    if ! command -v trivy >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: trivy is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    trivy --version
+
+                    # 1. Scan the locally-built image. --exit-code 0 
+                    trivy image \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --exit-code 0 \
+                        --no-progress \
+                        --format json \
+                        --output "${WORKSPACE}/trivy-image-report.json" \
+                        "${IMAGE_URI}"
+
+                    # 2. Render the JSON as a human-readable table.
+                    echo ""
+                    echo "-- Findings (HIGH / CRITICAL, fixed-only) ----"
+                    trivy convert \
+                        --format table \
+                        --severity HIGH,CRITICAL \
+                        --scanners vuln \
+                        "${WORKSPACE}/trivy-image-report.json"
+
+                    # 3. Apply the gate.
+                    HIGH_CRIT_COUNT=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${WORKSPACE}/trivy-image-report.json")
+                    echo ""
+                    echo "Total HIGH/CRITICAL (fixed) findings in image: ${HIGH_CRIT_COUNT}"
+
+                    if [ "${HIGH_CRIT_COUNT}" -gt 0 ]; then
+                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"
+                        echo "Remediation: bump the base image tag in the Dockerfile (eclipse-temurin) and rebuild."
+                        exit 1
+                    fi
+
+                    echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
+                '''
+            }
+
+            post {
+                always {
+                    script {
+                        logWarning('Archiving trivy image report if available')
+                    }
+
+                    archiveArtifacts artifacts: 'trivy-image-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+                success {
+                    script {
+                        logSuccess('Image Vulnerability Scan stage completed')
+                    }
+                }
+                failure {
+                    script {
+                        logError('Image Vulnerability Scan failed. Either fixable CVEs were found, or trivy errored.')
                     }
                 }
             }
