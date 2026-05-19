@@ -110,11 +110,63 @@ pipeline {
                     script {
                         success('Secret Scan stage completed')
                     }
+                }                failure {
+                    script {
+                        errorMsg('Secret Scan failed. Secrets may be detected or gitleaks encountered an error')
+                    }
+                }
+            }
+        }
+
+        stage('Dependency Vulnerability Scan') {
+            steps {
+                script {
+                    stageHeader('Dependency Vulnerability Scan (Trivy fs)')
+                }
+
+                sh '''
+                    echo "-- Running trivy fs ---------------------------"
+
+                    if ! command -v trivy >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: trivy is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    trivy --version
+
+                    trivy fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 1 \
+                        --no-progress \
+                        --format json \
+                        --output "${WORKSPACE}/trivy-fs-report.json" \
+                        application-backend/auth-service
+
+                    echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
+                '''
+            }
+
+            post {
+                always {
+                    script {
+                        warn('Archiving trivy fs report if available')
+                    }
+
+                    archiveArtifacts artifacts: 'trivy-fs-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+
+                success {
+                    script {
+                        success('Dependency Vulnerability Scan stage completed')
+                    }
                 }
 
                 failure {
                     script {
-                        errorMsg('Secret Scan failed. Secrets may be detected or gitleaks encountered an error')
+                        errorMsg('Dependency Vulnerability Scan failed. HIGH/CRITICAL CVEs found or trivy errored')
                     }
                 }
             }
