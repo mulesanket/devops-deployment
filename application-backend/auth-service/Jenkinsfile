@@ -230,10 +230,11 @@ pipeline {
         }
 
         stage('Image Vulnerability Scan') {
-            steps {
-                script {
+            steps {                script {
                     stageHeader('Image Vulnerability Scan - Trivy image')
-                }                sh '''
+                }
+
+                sh '''
                     set -e
                     echo "-- Running trivy image ------------------------"
 
@@ -277,11 +278,11 @@ pipeline {
                         echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"
                         echo "Remediation: bump the base image tag in the Dockerfile (eclipse-temurin) and rebuild."
                         exit 1
-                    fi
-
-                    echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
+                    fi                    echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                 '''
-            }            post {
+            }
+
+            post {
                 always {
                     script {
                         logWarning('Archiving trivy image report if available')
@@ -298,11 +299,128 @@ pipeline {
                     script {
                         logSuccess('Image Vulnerability Scan stage completed')
                     }
-                }
-                failure {
+                }                failure {
                     script {
                         logError('Image Vulnerability Scan failed. Either fixable CVEs were found, or trivy errored.')
                     }
+                }
+            }
+        }
+
+        stage('ECR Login & Push') {
+            steps {
+                script {
+                    stageHeader('ECR Login & Push')
+                    logInfo("Target registry: ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com")
+                    logInfo("Pushing image  : ${env.IMAGE_URI}")
+                }
+
+                sh '''
+                    set -e
+                    echo "-- Pre-flight checks --------------------------"
+
+                    if ! command -v aws >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: aws CLI is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    aws --version
+                    echo ""
+                    echo "Caller identity (must have ecr:* perms on this repo):"
+                    aws sts get-caller-identity --output table
+
+                    echo ""
+                    echo "-- Docker login to ECR ------------------------"
+                    # Short-lived (12h) auth token piped via stdin so it never
+                    # appears in process args, shell history, or Jenkins logs.
+                    aws ecr get-login-password --region "${AWS_REGION}" \
+                        | docker login \
+                            --username AWS \
+                            --password-stdin \
+                            "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+                    echo ""
+                    echo "-- Pushing image ------------------------------"
+                    echo "Image: ${IMAGE_URI}"
+                    docker push "${IMAGE_URI}"
+
+                    echo ""
+                    echo "-- Verifying image in ECR ---------------------"
+                    aws ecr describe-images \
+                        --repository-name "shopease-webapp-development-${SERVICE_NAME}" \
+                        --image-ids "imageTag=${GIT_SHA}" \
+                        --region "${AWS_REGION}" \
+                        --query 'imageDetails[0].{Tag:imageTags[0],Digest:imageDigest,Pushed:imagePushedAt,SizeMB:imageSizeInBytes}' \
+                        --output table
+
+                    echo ""
+                    echo "\\033[1;32mSUCCESS: Image pushed and verified in ECR.\\033[0m"
+                '''
+            }
+
+            post {
+                success {
+                    script {
+                        logSuccess("ECR Push completed: ${env.IMAGE_URI}")
+                    }
+                }
+                failure {
+                    script {
+                        logError('ECR Push failed. Common causes: IAM perms missing (ecr:PutImage / ecr:UploadLayerPart), repo does not exist, or network egress blocked.')
+                    }
+                }
+                always {
+                    // Always log out of the registry so the auth token in
+                    // ~/.docker/config.json does not linger between builds.
+                    sh '''
+                        docker logout "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" || true
+                    '''
+                }
+            }
+        }
+
+        stage('Post-Build Cleanup & Summary') {
+            steps {
+                script {
+                    stageHeader('Post-Build Cleanup & Summary')
+                }
+
+                sh '''
+                    set +e
+                    echo "-- Removing local image -----------------------"
+                    # Image is safely in ECR now; no reason to keep it on the
+                    # Jenkins host. Leaving images behind fills the disk after
+                    # a few dozen builds on a bare-metal agent.
+                    docker rmi "${IMAGE_URI}" || true
+
+                    echo ""
+                    echo "-- Pruning dangling layers --------------------"
+                    # Surgical: only dangling (untagged) intermediate layers.
+                    # We intentionally do NOT run 'docker system prune -a'
+                    # because that would wipe the base-image cache
+                    # (eclipse-temurin, maven) and force a ~500MB re-pull
+                    # on the next build.
+                    docker image prune -f
+
+                    echo ""
+                    echo "-- Disk usage ---------------------------------"
+                    df -h / | tail -2
+                    docker system df
+                '''
+
+                script {
+                    echo color('1;36', """
+============================================================
+ BUILD SUMMARY
+============================================================
+ Service     : ${env.SERVICE_NAME}
+ Branch      : ${env.BRANCH_NAME}
+ Git SHA     : ${env.GIT_SHA}
+ Image URI   : ${env.IMAGE_URI}
+ Build #     : ${env.BUILD_NUMBER}
+ Result      : ${currentBuild.currentResult}
+============================================================
+""")
                 }
             }
         }
