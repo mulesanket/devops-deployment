@@ -1,6 +1,3 @@
-// vars/logger.groovy
-// Color-coded structured logging used by every stage of the shared pipeline.
-// Usage from a Jenkinsfile or another vars/*.groovy file:
 
 def color(String code, String message) {
     return "\u001B[${code}m${message}\u001B[0m"
