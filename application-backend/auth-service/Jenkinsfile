@@ -1,33 +1,5 @@
 @Library('shopease-jenkins-library') _
 
-def color(code, message) {
-    return "\u001B[${code}m${message}\u001B[0m"
-}
-
-def stageHeader(String name) {
-    echo color('1;36', """
-============================================================
- STAGE STARTED: ${name}
-============================================================
-""")
-}
-
-def logSuccess(String message) {
-    echo color('1;32', "SUCCESS: ${message}")
-}
-
-def logWarning(String message) {
-    echo color('1;33', "WARNING: ${message}")
-}
-
-def logInfo(String message) {
-    echo color('1;34', "INFO: ${message}")
-}
-
-def logError(String message) {
-    echo color('1;31', "ERROR: ${message}")
-}
-
 pipeline {
     agent any
 
@@ -45,42 +17,47 @@ pipeline {
     }
 
     stages {
+
+        // -------------------------------------------------------------
+        // 1. Setup & Environment
+        // -------------------------------------------------------------
         stage('Setup & Environment') {
             steps {
                 script {
-                    stageHeader('Setup & Environment')
+                    logger.stageHeader('Setup & Environment')
 
                     env.AWS_ACCOUNT_ID = sh(
                         script: 'aws sts get-caller-identity --query Account --output text',
                         returnStdout: true
                     ).trim()
 
-                    env.ECR_REPO = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/shopease-webapp-development-${env.SERVICE_NAME}"
-
+                    env.ECR_REPO  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/shopease-webapp-development-${env.SERVICE_NAME}"
                     env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.IMAGE_TAG = "${env.GIT_SHA}"
                     env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
 
-                    logInfo("Service    : ${env.SERVICE_NAME}")
-                    logInfo("AWS Account: ${env.AWS_ACCOUNT_ID}")
-                    logInfo("AWS Region : ${env.AWS_REGION}")
-                    logInfo("Branch     : ${env.BRANCH_NAME}")
-                    logInfo("Git SHA    : ${env.GIT_SHA}")
-                    logInfo("Image URI  : ${env.IMAGE_URI}")
-                    logInfo("Workspace  : ${env.WORKSPACE}")
+                    logger.logInfo("Service    : ${env.SERVICE_NAME}")
+                    logger.logInfo("AWS Account: ${env.AWS_ACCOUNT_ID}")
+                    logger.logInfo("AWS Region : ${env.AWS_REGION}")
+                    logger.logInfo("Branch     : ${env.BRANCH_NAME}")
+                    logger.logInfo("Git SHA    : ${env.GIT_SHA}")
+                    logger.logInfo("Image URI  : ${env.IMAGE_URI}")
+                    logger.logInfo("Workspace  : ${env.WORKSPACE}")
 
-                    logSuccess('Setup & Environment completed')
+                    logger.logSuccess('Setup & Environment completed')
                 }
             }
         }
 
+        // -------------------------------------------------------------
+        // 2. Secret Scan (gitleaks)
+        // -------------------------------------------------------------
         stage('Secret Scan') {
             steps {
-                script {
-                    stageHeader('Secret Scan')
-                }
+                script { logger.stageHeader('Secret Scan') }
 
                 sh '''
+                    set -e
                     echo "-- Running gitleaks ---------------------------"
 
                     if ! command -v gitleaks >/dev/null 2>&1; then
@@ -102,13 +79,9 @@ pipeline {
                     echo "\\033[1;32mSUCCESS: No secrets detected.\\033[0m"
                 '''
             }
-
             post {
                 always {
-                    script {
-                        logWarning('Archiving gitleaks report if available')
-                    }
-
+                    script { logger.logWarning('Archiving gitleaks report if available') }
                     archiveArtifacts artifacts: 'gitleaks-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
@@ -116,11 +89,12 @@ pipeline {
             }
         }
 
+        // -------------------------------------------------------------
+        // 3. Dependency Vulnerability Scan (trivy fs)
+        // -------------------------------------------------------------
         stage('Dependency Vulnerability Scan') {
             steps {
-                script {
-                    stageHeader('Dependency Vulnerability Scan - Trivy fs')
-                }
+                script { logger.stageHeader('Dependency Vulnerability Scan - Trivy fs') }
 
                 sh '''
                     set -e
@@ -131,7 +105,7 @@ pipeline {
                         exit 1
                     fi
 
-                    trivy --version                    
+                    trivy --version
                     trivy fs \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
@@ -139,7 +113,7 @@ pipeline {
                         --no-progress \
                         --format json \
                         --output "${WORKSPACE}/trivy-fs-report.json" \
-                        application-backend/auth-service
+                        application-backend/${SERVICE_NAME}
 
                     echo ""
                     echo "-- Findings (HIGH / CRITICAL only) ------------"
@@ -161,13 +135,9 @@ pipeline {
                     echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                 '''
             }
-
             post {
                 always {
-                    script {
-                        logWarning('Archiving trivy fs report if available')
-                    }
-
+                    script { logger.logWarning('Archiving trivy fs report if available') }
                     archiveArtifacts artifacts: 'trivy-fs-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
@@ -175,11 +145,14 @@ pipeline {
             }
         }
 
+        // -------------------------------------------------------------
+        // 4. Build & Unit Tests (containerized Maven)
+        // -------------------------------------------------------------
         stage('Build & Unit Tests') {
             steps {
                 script {
-                    stageHeader('Build & Unit Tests')
-                    logInfo('Running Maven verify inside containerized toolchain (maven:3.9-eclipse-temurin-21)')
+                    logger.stageHeader('Build & Unit Tests')
+                    logger.logInfo('Running Maven verify inside containerized toolchain (maven:3.9-eclipse-temurin-21)')
                 }
 
                 sh '''
@@ -204,7 +177,7 @@ pipeline {
                         -v /var/lib/jenkins/.m2:/root/.m2 \
                         -w /workspace/application-backend \
                         maven:3.9-eclipse-temurin-21 \
-                        mvn -pl auth-service -am -B -ntp verify
+                        mvn -pl ${SERVICE_NAME} -am -B -ntp verify
 
                     echo ""
                     echo "-- Test report locations ----------------------"
@@ -215,47 +188,34 @@ pipeline {
                     echo "\\033[1;32mSUCCESS: Build and unit tests completed.\\033[0m"
                 '''
             }
-
             post {
                 always {
-                    script {
-                        logWarning('Publishing JUnit results and coverage reports')
-                    }
-
+                    script { logger.logWarning('Publishing JUnit results and coverage reports') }
                     junit testResults: 'application-backend/**/target/surefire-reports/*.xml',
                           allowEmptyResults: false,
                           skipPublishingChecks: true
-
                     recordCoverage(
                         tools: [[parser: 'JACOCO', pattern: 'application-backend/**/target/site/jacoco/jacoco.xml']],
                         sourceCodeRetention: 'EVERY_BUILD',
                         sourceDirectories: [[path: 'application-backend/auth-service/src/main/java']]
                     )
-
                     archiveArtifacts artifacts: 'application-backend/**/target/site/jacoco/jacoco.xml',
                                      allowEmptyArchive: true,
                                      fingerprint: true
                 }
-
-                success {
-                    script {
-                        logSuccess('Build & Unit Tests stage completed')
-                    }
-                }
-
-                failure {
-                    script {
-                        logError('Build & Unit Tests failed. Check the JUnit test report on the build page for failing tests, or the log above for compile errors.')
-                    }
-                }
+                success { script { logger.logSuccess('Build & Unit Tests stage completed') } }
+                failure { script { logger.logError('Build & Unit Tests failed. Check JUnit report or compile errors above.') } }
             }
         }
 
+        // -------------------------------------------------------------
+        // 5. Docker Build
+        // -------------------------------------------------------------
         stage('Docker Build') {
             steps {
                 script {
-                    stageHeader('Docker Build')
-                    logInfo("Building image: ${env.IMAGE_URI}")
+                    logger.stageHeader('Docker Build')
+                    logger.logInfo("Building image: ${env.IMAGE_URI}")
                 }
 
                 sh '''
@@ -276,15 +236,15 @@ pipeline {
 
                     echo ""
                     echo "-- Building image -----------------------------"
-                    echo "Dockerfile : application-backend/auth-service/Dockerfile"
+                    echo "Dockerfile : application-backend/${SERVICE_NAME}/Dockerfile"
                     echo "Context    : application-backend/"
                     echo "Tag        : ${IMAGE_URI}"
-                    echo ""                    
+                    echo ""
 
                     docker build \
                         --pull \
                         --progress=plain \
-                        --file application-backend/auth-service/Dockerfile \
+                        --file application-backend/${SERVICE_NAME}/Dockerfile \
                         --tag "${IMAGE_URI}" \
                         --label "git.sha=${GIT_SHA}" \
                         --label "git.branch=${BRANCH_NAME}" \
@@ -300,27 +260,18 @@ pipeline {
                     echo "\\033[1;32mSUCCESS: Image built and tagged.\\033[0m"
                 '''
             }
-
             post {
-                success {
-                    script {
-                        logSuccess("Docker Build stage completed: ${env.IMAGE_URI}")
-                    }
-                }
-
-                failure {
-                    script {
-                        logError('Docker Build failed. Check the build log for the Dockerfile step that errored.')
-                    }
-                }
+                success { script { logger.logSuccess("Docker Build stage completed: ${env.IMAGE_URI}") } }
+                failure { script { logger.logError('Docker Build failed. Check the Dockerfile step that errored.') } }
             }
         }
 
+        // -------------------------------------------------------------
+        // 6. Image Vulnerability Scan (trivy image)
+        // -------------------------------------------------------------
         stage('Image Vulnerability Scan') {
             steps {
-                script {
-                    stageHeader('Image Vulnerability Scan - Trivy image')
-                }
+                script { logger.stageHeader('Image Vulnerability Scan - Trivy image') }
 
                 sh '''
                     set -e
@@ -377,40 +328,28 @@ pipeline {
                     echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                 '''
             }
-
             post {
                 always {
-                    script {
-                        logWarning('Archiving trivy image report if available')
-                    }
-
+                    script { logger.logWarning('Archiving trivy image report if available') }
                     archiveArtifacts artifacts: 'trivy-image-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
-
                     sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                 }
-
-                success {
-                    script {
-                        logSuccess('Image Vulnerability Scan stage completed')
-                    }
-                }
-
-                failure {
-                    script {
-                        logError('Image Vulnerability Scan failed. Either fixable CVEs were found, or trivy errored.')
-                    }
-                }
+                success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
+                failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
             }
         }
 
+        // -------------------------------------------------------------
+        // 7. ECR Login & Push
+        // -------------------------------------------------------------
         stage('ECR Login & Push') {
             steps {
                 script {
-                    stageHeader('ECR Login & Push')
-                    logInfo("Target registry: ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com")
-                    logInfo("Pushing image  : ${env.IMAGE_URI}")
+                    logger.stageHeader('ECR Login & Push')
+                    logger.logInfo("Target registry: ${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com")
+                    logger.logInfo("Pushing image  : ${env.IMAGE_URI}")
                 }
 
                 sh '''
@@ -469,33 +408,19 @@ pipeline {
                     '''
                 }
             }
-
             post {
-                success {
-                    script {
-                        logSuccess("ECR Push completed: ${env.IMAGE_URI}")
-                    }
-                }
-
-                failure {
-                    script {
-                        logError('ECR Push failed. Common causes: IAM perms missing (ecr:PutImage / ecr:UploadLayerPart), repo does not exist, or network egress blocked.')
-                    }
-                }
-
-                always {
-                    sh '''
-                        docker logout "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" || true
-                    '''
-                }
+                success { script { logger.logSuccess("ECR Push completed: ${env.IMAGE_URI}") } }
+                failure { script { logger.logError('ECR Push failed. Check IAM perms (ecr:PutImage, ecr:UploadLayerPart) or network egress.') } }
+                always  { sh 'docker logout "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" || true' }
             }
         }
 
+        // -------------------------------------------------------------
+        // 8. Post-Build Cleanup & Summary
+        // -------------------------------------------------------------
         stage('Post-Build Cleanup & Summary') {
             steps {
-                script {
-                    stageHeader('Post-Build Cleanup & Summary')
-                }
+                script { logger.stageHeader('Post-Build Cleanup & Summary') }
 
                 sh '''
                     set +e
@@ -521,7 +446,7 @@ pipeline {
                 '''
 
                 script {
-                    echo color('1;36', """
+                    echo logger.color('1;36', """
 ============================================================
  BUILD SUMMARY
 ============================================================
@@ -539,28 +464,9 @@ pipeline {
     }
 
     post {
-        success {
-            script {
-                logSuccess("Pipeline completed successfully. Build #${env.BUILD_NUMBER}")
-            }
-        }
-
-        failure {
-            script {
-                logError("Pipeline failed. Build #${env.BUILD_NUMBER}")
-            }
-        }
-
-        unstable {
-            script {
-                logWarning("Pipeline unstable. Build #${env.BUILD_NUMBER}")
-            }
-        }
-
-        always {
-            script {
-                logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}")
-            }
-        }
+        success  { script { logger.logSuccess("Pipeline completed successfully. Build #${env.BUILD_NUMBER}") } }
+        failure  { script { logger.logError("Pipeline failed. Build #${env.BUILD_NUMBER}") } }
+        unstable { script { logger.logWarning("Pipeline unstable. Build #${env.BUILD_NUMBER}") } }
+        always   { script { logger.logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}") } }
     }
 }
