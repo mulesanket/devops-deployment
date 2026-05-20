@@ -35,31 +35,34 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '3', daysToKeepStr: '30'))
+    }    environment {
+        SERVICE_NAME = 'auth-service'
+        AWS_REGION   = 'ap-south-1'
     }
 
-    environment {
-        SERVICE_NAME   = 'auth-service'
-        AWS_REGION     = 'ap-south-1'
-        AWS_ACCOUNT_ID = '483829975256'
-        ECR_REPO       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/shopease-webapp-development-${SERVICE_NAME}"
-    }
-
-    stages {
-
-        stage('Setup & Environment') {
+    stages {        stage('Setup & Environment') {
             steps {
                 script {
                     stageHeader('Setup & Environment')
+
+                    env.AWS_ACCOUNT_ID = sh(
+                        script: 'aws sts get-caller-identity --query Account --output text',
+                        returnStdout: true
+                    ).trim()
+
+                    env.ECR_REPO = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/shopease-webapp-development-${env.SERVICE_NAME}"
 
                     env.GIT_SHA   = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.IMAGE_TAG = "${env.GIT_SHA}"
                     env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
 
-                    logInfo("Service   : ${env.SERVICE_NAME}")
-                    logInfo("Branch    : ${env.BRANCH_NAME}")
-                    logInfo("Git SHA   : ${env.GIT_SHA}")
-                    logInfo("Image URI : ${env.IMAGE_URI}")
-                    logInfo("Workspace : ${env.WORKSPACE}")
+                    logInfo("Service    : ${env.SERVICE_NAME}")
+                    logInfo("AWS Account: ${env.AWS_ACCOUNT_ID}")
+                    logInfo("AWS Region : ${env.AWS_REGION}")
+                    logInfo("Branch     : ${env.BRANCH_NAME}")
+                    logInfo("Git SHA    : ${env.GIT_SHA}")
+                    logInfo("Image URI  : ${env.IMAGE_URI}")
+                    logInfo("Workspace  : ${env.WORKSPACE}")
 
                     logSuccess('Setup & Environment completed')
                 }
@@ -158,11 +161,85 @@ pipeline {
                 always {
                     script {
                         logWarning('Archiving trivy fs report if available')
-                    }
-
-                    archiveArtifacts artifacts: 'trivy-fs-report.json',
+                    }                    archiveArtifacts artifacts: 'trivy-fs-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
+                }
+            }
+        }
+
+        stage('Build & Unit Tests') {
+            steps {
+                script {
+                    stageHeader('Build & Unit Tests')
+                    logInfo('Running Maven verify inside containerized toolchain (maven:3.9-eclipse-temurin-21)')
+                }
+
+                sh '''
+                    set -e
+                    echo "-- Pre-flight checks --------------------------"
+
+                    if ! command -v docker >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: docker is required to run the containerized Maven build.\\033[0m"
+                        exit 1
+                    fi
+
+                    mkdir -p /var/lib/jenkins/.m2
+
+                    echo ""
+                    echo "-- Pulling Maven image ------------------------"
+                    docker pull maven:3.9-eclipse-temurin-21
+
+                    echo ""
+                    echo "-- Running mvn verify -------------------------"
+                    docker run --rm \
+                        -v "${WORKSPACE}":/workspace \
+                        -v /var/lib/jenkins/.m2:/root/.m2 \
+                        -w /workspace/application-backend \
+                        maven:3.9-eclipse-temurin-21 \
+                        mvn -pl auth-service -am -B -ntp verify
+
+                    echo ""
+                    echo "-- Test report locations ----------------------"
+                    find application-backend -type d -name surefire-reports | head -20
+                    find application-backend -type f -name jacoco.xml      | head -20
+
+                    echo ""
+                    echo "\\033[1;32mSUCCESS: Build and unit tests completed.\\033[0m"
+                '''
+            }
+
+            post {
+                always {
+                    script {
+                        logWarning('Publishing JUnit results and coverage reports')
+                    }
+
+                    junit testResults: 'application-backend/**/target/surefire-reports/*.xml',
+                          allowEmptyResults: false,
+                          skipPublishingChecks: true
+
+                    recordCoverage(
+                        tools: [[parser: 'JACOCO', pattern: 'application-backend/**/target/site/jacoco/jacoco.xml']],
+                        sourceCodeRetention: 'EVERY_BUILD',
+                        sourceDirectories: [[path: 'application-backend/auth-service/src/main/java']]
+                    )
+
+                    archiveArtifacts artifacts: 'application-backend/**/target/site/jacoco/jacoco.xml',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+
+                success {
+                    script {
+                        logSuccess('Build & Unit Tests stage completed')
+                    }
+                }
+
+                failure {
+                    script {
+                        logError('Build & Unit Tests failed. Check the JUnit test report on the build page for failing tests, or the log above for compile errors.')
+                    }
                 }
             }
         }
@@ -230,9 +307,7 @@ pipeline {
                     }
                 }
             }
-        }
-
-        stage('Image Vulnerability Scan') {
+        }        stage('Image Vulnerability Scan') {
             steps {
                 script {
                     stageHeader('Image Vulnerability Scan - Trivy image')
@@ -249,23 +324,28 @@ pipeline {
 
                     trivy --version
 
-                    # /tmp on this host is a 2GB tmpfs (RAM-backed). Trivy
-                    # extracts image layers + downloads its Java DB into TMPDIR,
-                    # which can exceed 2GB for a Spring Boot image. Redirect to
-                    # a workspace-local scratch dir on real disk.
                     export TMPDIR="${WORKSPACE}/.trivy-tmp"
                     mkdir -p "${TMPDIR}"
+                '''
+                retry(2) {
+                    sh '''
+                        set -e
+                        export TMPDIR="${WORKSPACE}/.trivy-tmp"
 
-                    trivy image \
-                        --scanners vuln \
-                        --severity HIGH,CRITICAL \
-                        --ignore-unfixed \
-                        --exit-code 0 \
-                        --no-progress \
-                        --format json \
-                        --output "${WORKSPACE}/trivy-image-report.json" \
-                        "${IMAGE_URI}"
+                        trivy image \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --exit-code 0 \
+                            --no-progress \
+                            --format json \
+                            --output "${WORKSPACE}/trivy-image-report.json" \
+                            "${IMAGE_URI}"
+                    '''
+                }
 
+                sh '''
+                    set -e
                     echo ""
                     echo "-- Findings (HIGH / CRITICAL, fixed-only) ----"
                     trivy convert \
@@ -279,7 +359,7 @@ pipeline {
                     echo "Total HIGH/CRITICAL (fixed) findings in image: ${HIGH_CRIT_COUNT}"
 
                     if [ "${HIGH_CRIT_COUNT}" -gt 0 ]; then
-                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"                        
+                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities in image with available fixes.\\033[0m"
                         echo "Remediation: bump the base image tag in the Dockerfile (eclipse-temurin) and rebuild."
                         exit 1
                     fi
@@ -298,7 +378,6 @@ pipeline {
                                      allowEmptyArchive: true,
                                      fingerprint: true
 
-                    // Clean up the scratch dir we created to dodge /tmp tmpfs limits.
                     sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
                 }
 
@@ -314,9 +393,7 @@ pipeline {
                     }
                 }
             }
-        }
-
-        stage('ECR Login & Push') {
+        }        stage('ECR Login & Push') {
             steps {
                 script {
                     stageHeader('ECR Login & Push')
@@ -337,34 +414,47 @@ pipeline {
                     echo ""
                     echo "Caller identity (must have ecr:* perms on this repo):"
                     aws sts get-caller-identity --output table
-
-                    echo ""
-                    echo "-- Docker login to ECR ------------------------"
-                    # Short-lived (12h) auth token piped via stdin so it never
-                    # appears in process args, shell history, or Jenkins logs.
-                    aws ecr get-login-password --region "${AWS_REGION}" \
-                        | docker login \
-                            --username AWS \
-                            --password-stdin \
-                            "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
-                    echo ""
-                    echo "-- Pushing image ------------------------------"
-                    echo "Image: ${IMAGE_URI}"
-                    docker push "${IMAGE_URI}"
-
-                    echo ""
-                    echo "-- Verifying image in ECR ---------------------"
-                    aws ecr describe-images \
-                        --repository-name "shopease-webapp-development-${SERVICE_NAME}" \
-                        --image-ids "imageTag=${GIT_SHA}" \
-                        --region "${AWS_REGION}" \
-                        --query 'imageDetails[0].{Tag:imageTags[0],Digest:imageDigest,Pushed:imagePushedAt,SizeMB:imageSizeInBytes}' \
-                        --output table
-
-                    echo ""
-                    echo "\\033[1;32mSUCCESS: Image pushed and verified in ECR.\\033[0m"
                 '''
+                retry(2) {
+                    sh '''
+                        set -e
+                        echo ""
+                        echo "-- Docker login to ECR ------------------------"
+
+                        aws ecr get-login-password --region "${AWS_REGION}" \
+                            | docker login \
+                                --username AWS \
+                                --password-stdin \
+                                "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                    '''
+                }
+
+                retry(2) {
+                    sh '''
+                        set -e
+                        echo ""
+                        echo "-- Pushing image ------------------------------"
+                        echo "Image: ${IMAGE_URI}"
+                        docker push "${IMAGE_URI}"
+                    '''
+                }
+
+                retry(2) {
+                    sh '''
+                        set -e
+                        echo ""
+                        echo "-- Verifying image in ECR ---------------------"
+                        aws ecr describe-images \
+                            --repository-name "shopease-webapp-development-${SERVICE_NAME}" \
+                            --image-ids "imageTag=${GIT_SHA}" \
+                            --region "${AWS_REGION}" \
+                            --query 'imageDetails[0].{Tag:imageTags[0],Digest:imageDigest,Pushed:imagePushedAt,SizeMB:imageSizeInBytes}' \
+                            --output table
+
+                        echo ""
+                        echo "\\033[1;32mSUCCESS: Image pushed and verified in ECR.\\033[0m"
+                    '''
+                }
             }
 
             post {
@@ -381,8 +471,6 @@ pipeline {
                 }
 
                 always {
-                    // Always log out of the registry so the auth token in
-                    // ~/.docker/config.json does not linger between builds.
                     sh '''
                         docker logout "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" || true
                     '''
