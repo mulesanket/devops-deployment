@@ -1,0 +1,243 @@
+@Library('shopease-jenkins-library') _
+
+// shopease-common is a Maven library module shared by all microservices.
+// It produces a JAR consumed by the other services via Maven dependency
+// resolution. There is no Dockerfile, no container, and no ECR push.
+//
+// Pipeline responsibilities:
+//   1. Secret scan (gitleaks)
+//   2. Dependency CVE scan (trivy fs)
+//   3. Build + unit tests + JaCoCo coverage (containerized Maven)
+//   4. Install the JAR into the shared /var/lib/jenkins/.m2 cache so
+//      downstream service builds on the same agent resolve it.
+
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        timestamps()
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '3', daysToKeepStr: '30'))
+    }
+
+    environment {
+        SERVICE_NAME = 'shopease-common'
+    }
+
+    stages {
+
+        // -------------------------------------------------------------
+        // 1. Setup & Environment
+        // -------------------------------------------------------------
+        stage('Setup & Environment') {
+            steps {
+                script {
+                    logger.stageHeader('Setup & Environment')
+
+                    env.GIT_SHA = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
+
+                    logger.logInfo("Service   : ${env.SERVICE_NAME}")
+                    logger.logInfo("Branch    : ${env.BRANCH_NAME}")
+                    logger.logInfo("Git SHA   : ${env.GIT_SHA}")
+                    logger.logInfo("Workspace : ${env.WORKSPACE}")
+
+                    logger.logSuccess('Setup & Environment completed')
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 2. Secret Scan (gitleaks)
+        // -------------------------------------------------------------
+        stage('Secret Scan') {
+            steps {
+                script { logger.stageHeader('Secret Scan') }
+
+                sh '''
+                    set -e
+                    echo "-- Running gitleaks ---------------------------"
+
+                    if ! command -v gitleaks >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: gitleaks is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    gitleaks version
+
+                    gitleaks detect \
+                        --source="${WORKSPACE}" \
+                        --no-git \
+                        --report-format=json \
+                        --report-path="${WORKSPACE}/gitleaks-report.json" \
+                        --redact \
+                        --verbose \
+                        --exit-code=1
+
+                    echo "\\033[1;32mSUCCESS: No secrets detected.\\033[0m"
+                '''
+            }
+            post {
+                always {
+                    script { logger.logWarning('Archiving gitleaks report if available') }
+                    archiveArtifacts artifacts: 'gitleaks-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 3. Dependency Vulnerability Scan (trivy fs)
+        // -------------------------------------------------------------
+        stage('Dependency Vulnerability Scan') {
+            steps {
+                script { logger.stageHeader('Dependency Vulnerability Scan - Trivy fs') }
+
+                sh '''
+                    set -e
+                    echo "-- Running trivy fs ---------------------------"
+
+                    if ! command -v trivy >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: trivy is not installed on Jenkins agent.\\033[0m"
+                        exit 1
+                    fi
+
+                    trivy --version
+                    trivy fs \
+                        --scanners vuln \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        --no-progress \
+                        --format json \
+                        --output "${WORKSPACE}/trivy-fs-report.json" \
+                        application-backend/${SERVICE_NAME}
+
+                    echo ""
+                    echo "-- Findings (HIGH / CRITICAL only) ------------"
+                    trivy convert \
+                        --format table \
+                        --severity HIGH,CRITICAL \
+                        --scanners vuln \
+                        "${WORKSPACE}/trivy-fs-report.json"
+
+                    HIGH_CRIT_COUNT=$(jq '[.Results[]?.Vulnerabilities[]?] | length' "${WORKSPACE}/trivy-fs-report.json")
+                    echo ""
+                    echo "Total HIGH/CRITICAL findings: ${HIGH_CRIT_COUNT}"
+
+                    if [ "${HIGH_CRIT_COUNT}" -gt 0 ]; then
+                        echo "\\033[1;31mFAIL: ${HIGH_CRIT_COUNT} HIGH/CRITICAL vulnerabilities found in dependencies.\\033[0m"
+                        exit 1
+                    fi
+
+                    echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
+                '''
+            }
+            post {
+                always {
+                    script { logger.logWarning('Archiving trivy fs report if available') }
+                    archiveArtifacts artifacts: 'trivy-fs-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 4. Build, Test & Install (containerized Maven)
+        // -------------------------------------------------------------
+        // `mvn install` (not just verify) so that the resulting JAR is
+        // placed in /var/lib/jenkins/.m2/repository and is immediately
+        // usable by cart/order/product/auth service builds on this agent.
+        stage('Build, Test & Install') {
+            steps {
+                script {
+                    logger.stageHeader('Build, Test & Install')
+                    logger.logInfo('Running Maven install inside containerized toolchain (maven:3.9-eclipse-temurin-21)')
+                }
+
+                sh '''
+                    set -e
+                    echo "-- Pre-flight checks --------------------------"
+
+                    if ! command -v docker >/dev/null 2>&1; then
+                        echo "\\033[1;31mERROR: docker is required to run the containerized Maven build.\\033[0m"
+                        exit 1
+                    fi
+
+                    mkdir -p /var/lib/jenkins/.m2
+
+                    echo ""
+                    echo "-- Pulling Maven image ------------------------"
+                    docker pull maven:3.9-eclipse-temurin-21
+
+                    echo ""
+                    echo "-- Running mvn install ------------------------"
+                    docker run --rm \
+                        -v "${WORKSPACE}":/workspace \
+                        -v /var/lib/jenkins/.m2:/root/.m2 \
+                        -w /workspace/application-backend \
+                        maven:3.9-eclipse-temurin-21 \
+                        mvn -pl ${SERVICE_NAME} -am -B -ntp install
+
+                    echo ""
+                    echo "-- Artifacts installed to local repo ----------"
+                    find /var/lib/jenkins/.m2/repository -type d -name shopease-common | head -5 || true
+
+                    echo ""
+                    echo "\\033[1;32mSUCCESS: Library built, tested and installed.\\033[0m"
+                '''
+            }
+            post {
+                always {
+                    script { logger.logWarning('Publishing JUnit results and coverage reports') }
+
+                    junit testResults: 'application-backend/**/target/surefire-reports/*.xml',
+                          allowEmptyResults: true,
+                          skipPublishingChecks: true
+
+                    recordCoverage(
+                        tools: [[parser: 'JACOCO', pattern: 'application-backend/**/target/site/jacoco/jacoco.xml']],
+                        sourceCodeRetention: 'EVERY_BUILD',
+                        sourceDirectories: [[path: 'application-backend/shopease-common/src/main/java']]
+                    )
+
+                    archiveArtifacts artifacts: 'application-backend/shopease-common/target/*.jar',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+                success { script { logger.logSuccess('Build, Test & Install stage completed') } }
+                failure { script { logger.logError('Build, Test & Install failed. Check JUnit report or compile errors above.') } }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 5. Summary
+        // -------------------------------------------------------------
+        stage('Summary') {
+            steps {
+                script {
+                    echo logger.color('1;36', """
+============================================================
+ BUILD SUMMARY
+============================================================
+ Service     : ${env.SERVICE_NAME}
+ Branch      : ${env.BRANCH_NAME}
+ Git SHA     : ${env.GIT_SHA}
+ Build #     : ${env.BUILD_NUMBER}
+ Result      : ${currentBuild.currentResult}
+============================================================
+""")
+                }
+            }
+        }
+    }
+
+    post {
+        success  { script { logger.logSuccess("Pipeline completed successfully. Build #${env.BUILD_NUMBER}") } }
+        failure  { script { logger.logError("Pipeline failed. Build #${env.BUILD_NUMBER}") } }
+        unstable { script { logger.logWarning("Pipeline unstable. Build #${env.BUILD_NUMBER}") } }
+        always   { script { logger.logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}") } }
+    }
+}
