@@ -35,12 +35,15 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '3', daysToKeepStr: '30'))
-    }    environment {
+    }
+
+    environment {
         SERVICE_NAME = 'auth-service'
         AWS_REGION   = 'ap-south-1'
     }
 
-    stages {        stage('Setup & Environment') {
+    stages {
+        stage('Setup & Environment') {
             steps {
                 script {
                     stageHeader('Setup & Environment')
@@ -161,7 +164,9 @@ pipeline {
                 always {
                     script {
                         logWarning('Archiving trivy fs report if available')
-                    }                    archiveArtifacts artifacts: 'trivy-fs-report.json',
+                    }
+
+                    archiveArtifacts artifacts: 'trivy-fs-report.json',
                                      allowEmptyArchive: true,
                                      fingerprint: true
                 }
@@ -307,7 +312,9 @@ pipeline {
                     }
                 }
             }
-        }        stage('Image Vulnerability Scan') {
+        }
+
+        stage('Image Vulnerability Scan') {
             steps {
                 script {
                     stageHeader('Image Vulnerability Scan - Trivy image')
@@ -327,6 +334,7 @@ pipeline {
                     export TMPDIR="${WORKSPACE}/.trivy-tmp"
                     mkdir -p "${TMPDIR}"
                 '''
+
                 retry(2) {
                     sh '''
                         set -e
@@ -393,7 +401,9 @@ pipeline {
                     }
                 }
             }
-        }        stage('ECR Login & Push') {
+        }
+
+        stage('ECR Login & Push') {
             steps {
                 script {
                     stageHeader('ECR Login & Push')
@@ -415,6 +425,7 @@ pipeline {
                     echo "Caller identity (must have ecr:* perms on this repo):"
                     aws sts get-caller-identity --output table
                 '''
+
                 retry(2) {
                     sh '''
                         set -e
