@@ -5,8 +5,29 @@
 .DS_Store
 Thumbs.db
 
-# Build output
+# Build output - exclude target/ contents broadly, then allow the JAR we need
 **/target/
+!auth-service/target/
+auth-service/target/*
+!auth-service/target/auth-service-*.jar
+!cart-service/target/
+cart-service/target/*
+!cart-service/target/cart-service-*.jar
+!order-service/target/
+order-service/target/*
+!order-service/target/order-service-*.jar
+!product-service/target/
+product-service/target/*
+!product-service/target/product-service-*.jar
+
+# Source - not needed in the runtime image (build-once pattern: JAR is the only input)
+**/src/
+
+# Maven wrapper / config - not needed since we don't run mvn inside Dockerfile
+**/.mvn/
+**/mvnw
+**/mvnw.cmd
+**/pom.xml
 
 # Git
 .git
@@ -16,6 +37,9 @@ Thumbs.db
 **/Dockerfile
 **/.dockerignore
 docker-compose*.yaml
+
+# Jenkins
+**/Jenkinsfile
 
 # Lambda (not needed in Java builds)
 lambda/
