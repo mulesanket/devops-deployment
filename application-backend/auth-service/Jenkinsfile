@@ -470,3 +470,4 @@ pipeline {
         always   { script { logger.logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}") } }
     }
 }
+
