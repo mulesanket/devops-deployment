@@ -1,0 +1,56 @@
+# ============================================
+# Shopease: ServiceAccount used by the Jenkins
+# controller (running on EC2) to authenticate
+# to the EKS API when creating/deleting agent
+# pods via the Kubernetes plugin.
+#
+# Author: Sanket Mule
+# --------------------------------------------
+# Why a SA token (not IRSA, not EC2 profile)?
+#   The Jenkins Kubernetes plugin needs a raw
+#   bearer token to put in the Authorization
+#   header. IRSA requires the caller to live
+#   inside the cluster; EC2 instance profile
+#   would require an exec credential plugin
+#   which the Java client doesn't support.
+#   A namespaced ServiceAccount token is the
+#   simplest, auditable, revocable option.
+# ============================================
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-controller
+  namespace: jenkins-cicd-agents
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+---
+# Long-lived token (K8s 1.24+ no longer auto-creates these,
+# so we declare one explicitly and link it to the SA above).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-controller-token
+  namespace: jenkins-cicd-agents
+  annotations:
+    kubernetes.io/service-account.name: jenkins-controller
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+type: kubernetes.io/service-account-token
+---
+# Bind the SA to the existing Role created in ci-cd-jenkins-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-controller-sa-binding
+  namespace: jenkins-cicd-agents
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-controller
+    namespace: jenkins-cicd-agents
+roleRef:
+  kind: Role
+  name: jenkins-agent-manager
+  apiGroup: rbac.authorization.k8s.io
