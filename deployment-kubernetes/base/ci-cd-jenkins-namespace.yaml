@@ -1,0 +1,12 @@
+# ============================================
+# Shopease: shopease-webapp ci-cd jenkins agents namespace
+# Author: Sanket Mule
+# ============================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins-cicd-agents
+  labels:
+    env: development
+

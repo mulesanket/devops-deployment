@@ -106,6 +106,7 @@ pipeline {
                     fi
 
                     trivy --version
+
                     trivy fs \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
@@ -424,19 +425,11 @@ pipeline {
 
                 sh '''
                     set +e
-                    echo "-- Removing local image -----------------------"
-                    # Image is safely in ECR now; no reason to keep it on the
-                    # Jenkins host. Leaving images behind fills the disk after
-                    # a few dozen builds on a bare-metal agent.
                     docker rmi "${IMAGE_URI}" || true
 
                     echo ""
-                    echo "-- Pruning dangling layers --------------------"
-                    # Surgical: only dangling (untagged) intermediate layers.
-                    # We intentionally do NOT run 'docker system prune -a'
-                    # because that would wipe the base-image cache
-                    # (eclipse-temurin, maven) and force a ~500MB re-pull
-                    # on the next build.
+
+                    echo "-- Pruning dangling layers --------------------"    
                     docker image prune -f
 
                     echo ""
@@ -444,7 +437,6 @@ pipeline {
                     df -h / | tail -2
                     docker system df
                 '''
-
                 script {
                     echo logger.color('1;36', """
 ============================================================

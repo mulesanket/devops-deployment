@@ -1,0 +1,60 @@
+# ============================================
+# Shopease: RBAC for the Jenkins controller (running on EC2)
+# Author: Sanket Mule
+# --------------------------------------------
+# Purpose:
+#   Grants the Jenkins controller's IAM role
+#   (mapped to the K8s group "jenkins-agent-admins"
+#   via EKS Access Entry / aws-auth) the minimum
+#   permissions needed to spawn and manage build
+#   agent pods in the "jenkins-cicd-agents" namespace.
+#
+# Scope: namespace-only (NOT cluster-wide).
+# ============================================
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-agent-manager
+  namespace: jenkins-cicd-agents
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+rules:
+  # Lifecycle of agent pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec", "pods/log", "pods/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+
+  # Plugin needs to read its own config + mount cache volumes
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events (for pod scheduling diagnostics in Jenkins UI)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+  # ServiceAccounts (plugin sets SA on agent pods)
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-agent-manager-binding
+  namespace: jenkins-cicd-agents
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+subjects:
+  # This group name MUST match what you put in:
+  #   - EKS Access Entry  (--kubernetes-groups jenkins-agent-admins)
+  #   - or aws-auth ConfigMap (groups: [jenkins-agent-admins])
+  - kind: Group
+    name: jenkins-agent-admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: jenkins-agent-manager
+  apiGroup: rbac.authorization.k8s.io
