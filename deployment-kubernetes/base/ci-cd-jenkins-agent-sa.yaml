@@ -24,9 +24,12 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jenkins-ci
     app.kubernetes.io/component: build-agent
-  # annotations:
-  #   # Uncomment in Step 6 after IRSA role is created.
-  #   eks.amazonaws.com/role-arn: arn:aws:iam::483829975256:role/ci-agent-shopease
+  annotations:
+    # IRSA: links this SA to IAM role created by
+    #   infrastructure-terraform/environments/development/ci-cd.tf
+    # Role grants:  ECR push to shopease-webapp-development-* repos
+    #               S3 put to shopease-webapp-development-ci-artifacts bucket
+    eks.amazonaws.com/role-arn: arn:aws:iam::483829975256:role/shopease-webapp-development-ci-agent-irsa
 
 
 
