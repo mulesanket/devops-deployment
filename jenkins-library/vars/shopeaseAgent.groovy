@@ -129,13 +129,19 @@ spec:
         limits:   { cpu: "1",    memory: "1Gi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
-
   volumes:
     - name: workspace-volume
       emptyDir: {}
+    # NOTE: Maven cache is currently emptyDir (per-build, no persistence).
+    # To enable a persistent cache across builds:
+    #   1. Install the AWS EBS CSI driver add-on on the EKS cluster
+    #   2. Create a gp3 StorageClass
+    #   3. Apply ci-cd-jenkins-maven-cache-pvc.yaml
+    #   4. Replace this emptyDir with:
+    #        persistentVolumeClaim:
+    #          claimName: ${mavenCachePvc}
     - name: maven-cache
-      persistentVolumeClaim:
-        claimName: ${mavenCachePvc}
+      emptyDir: {}
     - name: kaniko-cache
       emptyDir: {}
 """
