@@ -1,6 +1,7 @@
 @Library('shopease-jenkins-library') _
 
-pipeline {    agent {
+pipeline {
+    agent {
         kubernetes {
             yaml shopeaseAgent(serviceName: 'auth-service')
             defaultContainer 'jnlp'
@@ -72,15 +73,16 @@ pipeline {    agent {
                     sh '''
                         set -e
                         echo "-- Running trivy secret scan ------------------"
-                        trivy --version
-
+                        trivy --version                        
                         trivy fs \
                             --scanners secret \
                             --exit-code 1 \
                             --no-progress \
                             --format json \
                             --output "${WORKSPACE}/trivy-secrets-report.json" \
-                            "application-backend/${SERVICE_NAME}"                        echo ""
+                            "application-backend/${SERVICE_NAME}"
+
+                        echo ""
                         echo "-- Secret findings ----------------------------"
                         trivy convert \
                             --format table \
@@ -109,8 +111,7 @@ pipeline {    agent {
                     sh '''
                         set -e
                         echo "-- Running trivy fs (vuln) --------------------"
-                        trivy --version
-
+                        trivy --version                        
                         trivy fs \
                             --scanners vuln \
                             --severity HIGH,CRITICAL \
@@ -118,7 +119,9 @@ pipeline {    agent {
                             --no-progress \
                             --format json \
                             --output "${WORKSPACE}/trivy-fs-report.json" \
-                            "application-backend/${SERVICE_NAME}"                        echo ""
+                            "application-backend/${SERVICE_NAME}"
+
+                        echo ""
                         echo "-- Findings (HIGH / CRITICAL only) ------------"
                         trivy convert \
                             --format table \
