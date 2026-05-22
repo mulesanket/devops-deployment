@@ -36,7 +36,9 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: gp3
+  # gp2 is the default SC on this cluster (kubectl get sc).
+  # If/when the EBS CSI driver + a gp3 SC are added, switch here.
+  storageClassName: gp2
   resources:
     requests:
       storage: 5Gi
