@@ -34,7 +34,9 @@ pipeline {
                         env.AWS_ACCOUNT_ID = sh(
                             script: 'aws sts get-caller-identity --query Account --output text',
                             returnStdout: true
-                        ).trim()                        env.ECR_REPO  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO_NAME}"
+                        ).trim()       
+                                         
+                        env.ECR_REPO  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO_NAME}"
                         // GIT_COMMIT is populated by the implicit `checkout scm`
                         // performed before stages start. Use it instead of
                         // shelling out to `git` (not installed in aws image).
