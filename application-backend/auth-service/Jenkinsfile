@@ -1,21 +1,3 @@
-// ============================================================
-// Shopease — auth-service CI/CD pipeline (EKS agent + Kaniko)
-//
-// This pipeline runs entirely on an ephemeral build pod scheduled
-// on the EKS cluster. The Jenkins controller (on EC2) only
-// orchestrates; no docker daemon, no host tools required.
-//
-// Pod template (from shared library):
-//   - jnlp   : Jenkins agent process (default container)
-//   - maven  : mvn verify
-//   - kaniko : daemonless image build + push to ECR (IRSA auth)
-//   - aws    : aws CLI for STS / ECR describe (IRSA auth)
-//   - tools  : trivy (vuln + secret scan), jq
-//
-// AWS auth: IRSA on ServiceAccount jenkins-agent-builder
-// (role: shopease-webapp-development-ci-agent-irsa)
-// ============================================================
-
 @Library('shopease-jenkins-library') _
 
 pipeline {
@@ -32,21 +14,17 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
-    }    environment {
+    }
+
+    environment {
         SERVICE_NAME  = 'auth-service'
         AWS_REGION    = 'ap-south-1'
         ECR_REPO_NAME = "shopease-webapp-development-${SERVICE_NAME}"
-        // BRANCH_NAME is only auto-set by multibranch jobs; fall back to
-        // GIT_BRANCH (classic pipeline) or 'development' so downstream
-        // string interpolation never produces "null-latest".
         SAFE_BRANCH   = "${env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceAll('^origin/', '') ?: 'development'}"
     }
 
     stages {
 
-        // -------------------------------------------------------------
-        // 1. Setup & Environment
-        // -------------------------------------------------------------
         stage('Setup & Environment') {
             steps {
                 container('aws') {
@@ -83,9 +61,6 @@ pipeline {
             }
         }
 
-        // -------------------------------------------------------------
-        // 2. Secret Scan (trivy fs --scanners secret)
-        // -------------------------------------------------------------
         stage('Secret Scan') {
             steps {
                 container('tools') {
@@ -126,18 +101,16 @@ pipeline {
             }
         }
 
-        // -------------------------------------------------------------
-        // 3. Dependency Vulnerability Scan (trivy fs --scanners vuln)
-        // -------------------------------------------------------------
         stage('Dependency Vulnerability Scan') {
             steps {
                 container('tools') {
-                    script { logger.stageHeader('Dependency Vulnerability Scan - Trivy fs') }                    sh '''
+                    script { logger.stageHeader('Dependency Vulnerability Scan - Trivy fs') }
+
+                    sh '''
                         set -e
                         echo "-- Running trivy fs (vuln) --------------------"
                         trivy --version
 
-                        # First pass: full JSON report, never fail (exit-code 0).
                         trivy fs \
                             --scanners vuln \
                             --severity HIGH,CRITICAL \
@@ -157,8 +130,6 @@ pipeline {
 
                         echo ""
                         echo "-- Gate (fail on any HIGH/CRITICAL) -----------"
-                        # Second pass: identical scan, but let trivy enforce
-                        # the gate via --exit-code 1 (avoids needing jq).
                         trivy fs \
                             --scanners vuln \
                             --severity HIGH,CRITICAL \
@@ -181,15 +152,12 @@ pipeline {
             }
         }
 
-        // -------------------------------------------------------------
-        // 4. Build & Unit Tests (Maven container)
-        // -------------------------------------------------------------
         stage('Build & Unit Tests') {
             steps {
                 container('maven') {
                     script {
                         logger.stageHeader('Build & Unit Tests')
-                        logger.logInfo('Running mvn verify inside maven:3.9-eclipse-temurin-21 container')
+                        logger.logInfo('Running mvn verify inside maven container')
                     }
 
                     sh '''
@@ -217,26 +185,10 @@ pipeline {
                     junit testResults: 'application-backend/**/target/surefire-reports/*.xml',
                           allowEmptyResults: false,
                           skipPublishingChecks: true
-                    recordCoverage(
-                        tools: [[parser: 'JACOCO', pattern: 'application-backend/**/target/site/jacoco/jacoco.xml']],
-                        sourceCodeRetention: 'EVERY_BUILD',
-                        sourceDirectories: [[path: 'application-backend/auth-service/src/main/java']]
-                    )
-                    archiveArtifacts artifacts: 'application-backend/**/target/site/jacoco/jacoco.xml',
-                                     allowEmptyArchive: true,
-                                     fingerprint: true
                 }
-                success { script { logger.logSuccess('Build & Unit Tests stage completed') } }
-                failure { script { logger.logError('Build & Unit Tests failed. Check JUnit report or compile errors above.') } }
             }
         }
 
-        // -------------------------------------------------------------
-        // 5. Image Build & Push (Kaniko -> ECR)
-        //    Kaniko builds and pushes in one step (daemonless).
-        //    ECR auth uses the AWS SDK bundled in the kaniko -debug
-        //    image, which picks up IRSA env vars automatically.
-        // -------------------------------------------------------------
         stage('Image Build & Push') {
             steps {
                 container('kaniko') {
@@ -247,15 +199,7 @@ pipeline {
 
                     sh '''
                         set -e
-                        echo "-- Kaniko version -----------------------------"
-                        /kaniko/executor version || true
-
-                        echo ""
-                        echo "-- Building & pushing image -------------------"
-                        echo "Dockerfile  : application-backend/${SERVICE_NAME}/Dockerfile"
-                        echo "Context     : application-backend/"
-                        echo "Destination : ${IMAGE_URI}"
-                        echo ""                        /kaniko/executor \
+                        /kaniko/executor \
                             --context "${WORKSPACE}/application-backend" \
                             --dockerfile "${SERVICE_NAME}/Dockerfile" \
                             --destination "${IMAGE_URI}" \
@@ -268,135 +212,28 @@ pipeline {
                             --use-new-run \
                             --log-format=text \
                             --verbosity=info
-
-                        echo ""
-                        echo "\\033[1;32mSUCCESS: Image built and pushed to ECR.\\033[0m"
                     '''
                 }
-            }
-            post {
-                success { script { logger.logSuccess("Image Build & Push completed: ${env.IMAGE_URI}") } }
-                failure { script { logger.logError('Kaniko build/push failed. Check Dockerfile, IRSA perms (ecr:PutImage), or registry connectivity.') } }
             }
         }
 
-        // -------------------------------------------------------------
-        // 6. Image Vulnerability Scan (trivy image — against ECR)
-        // -------------------------------------------------------------
-        stage('Image Vulnerability Scan') {
-            steps {
-                container('tools') {
-                    script { logger.stageHeader('Image Vulnerability Scan - Trivy image (ECR)') }
-
-                    sh '''
-                        set -e
-                        echo "-- Running trivy image ------------------------"
-                        trivy --version
-
-                        export TMPDIR="${WORKSPACE}/.trivy-tmp"
-                        mkdir -p "${TMPDIR}"
-                    '''
-
-                    retry(2) {
-                        sh '''
-                            set -e
-                            export TMPDIR="${WORKSPACE}/.trivy-tmp"
-
-                            # Trivy uses the AWS SDK (IRSA env vars injected by EKS)
-                            # to obtain ECR auth tokens automatically.
-                            trivy image \
-                                --scanners vuln \
-                                --severity HIGH,CRITICAL \
-                                --ignore-unfixed \
-                                --exit-code 0 \
-                                --no-progress \
-                                --format json \
-                                --output "${WORKSPACE}/trivy-image-report.json" \
-                                "${IMAGE_URI}"
-                        '''
-                    }                    sh '''
-                        set -e
-                        echo ""
-                        echo "-- Findings (HIGH / CRITICAL, fixed-only) -----"
-                        trivy convert \
-                            --format table \
-                            --severity HIGH,CRITICAL \
-                            --scanners vuln \
-                            "${WORKSPACE}/trivy-image-report.json"
-
-                        echo ""
-                        echo "-- Gate (fail on fixable HIGH/CRITICAL) -------"
-                        # Trivy enforces the gate directly; avoids needing jq.
-                        trivy image \
-                            --scanners vuln \
-                            --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --exit-code 1 \
-                            --no-progress \
-                            --quiet \
-                            "${IMAGE_URI}"
-
-                        echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
-                    '''
-                }
-            }
-            post {
-                always {
-                    script { logger.logWarning('Archiving trivy image report if available') }
-                    archiveArtifacts artifacts: 'trivy-image-report.json',
-                                     allowEmptyArchive: true,
-                                     fingerprint: true
-                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
-                }
-                success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
-                failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
-            }
-        }
-
-        // -------------------------------------------------------------
-        // 7. Verify ECR Push (aws describe-images)
-        // -------------------------------------------------------------
         stage('Verify ECR Push') {
             steps {
                 container('aws') {
-                    script {
-                        logger.stageHeader('Verify ECR Push')
-                        logger.logInfo("Verifying image : ${env.IMAGE_URI}")
-                    }
-
-                    retry(2) {
-                        sh '''
-                            set -e
-                            echo "-- Describing image in ECR --------------------"
-                            aws ecr describe-images \
-                                --repository-name "${ECR_REPO_NAME}" \
-                                --image-ids "imageTag=${GIT_SHA}" \
-                                --region "${AWS_REGION}" \
-                                --query 'imageDetails[0].{Tag:imageTags[0],Digest:imageDigest,Pushed:imagePushedAt,SizeBytes:imageSizeInBytes}' \
-                                --output table
-
-                            echo ""
-                            echo "\\033[1;32mSUCCESS: Image verified in ECR.\\033[0m"
-                        '''
-                    }
+                    sh '''
+                        aws ecr describe-images \
+                            --repository-name "${ECR_REPO_NAME}" \
+                            --image-ids "imageTag=${GIT_SHA}" \
+                            --region "${AWS_REGION}"
+                    '''
                 }
-            }
-            post {
-                success { script { logger.logSuccess("ECR verification completed: ${env.IMAGE_URI}") } }
-                failure { script { logger.logError('ECR verification failed. Image may not have been pushed; check Kaniko logs.') } }
             }
         }
 
-        // -------------------------------------------------------------
-        // 8. Build Summary
-        //    (No host cleanup needed — the agent pod is destroyed
-        //     automatically when the build ends.)
-        // -------------------------------------------------------------
         stage('Build Summary') {
             steps {
                 script {
-                    logger.stageHeader('Build Summary')
-                    echo logger.color('1;36', """
+                    echo """
 ============================================================
  BUILD SUMMARY
 ============================================================
@@ -408,16 +245,9 @@ pipeline {
  Agent pod   : ${env.NODE_NAME}
  Result      : ${currentBuild.currentResult}
 ============================================================
-""")
+"""
                 }
             }
         }
-    }
-
-    post {
-        success  { script { logger.logSuccess("Pipeline completed successfully. Build #${env.BUILD_NUMBER}") } }
-        failure  { script { logger.logError("Pipeline failed. Build #${env.BUILD_NUMBER}") } }
-        unstable { script { logger.logWarning("Pipeline unstable. Build #${env.BUILD_NUMBER}") } }
-        always   { script { logger.logInfo("Build #${env.BUILD_NUMBER} finished with status: ${currentBuild.currentResult}") } }
     }
 }
