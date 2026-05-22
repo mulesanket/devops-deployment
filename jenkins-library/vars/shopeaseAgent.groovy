@@ -64,12 +64,14 @@ spec:
   securityContext:
     runAsUser: 0
     fsGroup: 0
-  containers:
+  containers:    # NOTE: requests are intentionally small (the scheduler only
+    # reserves the request amount). Limits stay generous so heavy
+    # stages (mvn, kaniko) can burst when nodes have spare capacity.
     # ---- 1. JNLP — Jenkins agent process ----
     - name: jnlp
       image: ${jnlpImage}
       resources:
-        requests: { cpu: "100m", memory: "256Mi" }
+        requests: { cpu: "50m",  memory: "128Mi" }
         limits:   { cpu: "500m", memory: "512Mi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
@@ -81,8 +83,8 @@ spec:
       args: ["infinity"]
       tty: true
       resources:
-        requests: { cpu: "500m", memory: "1Gi" }
-        limits:   { cpu: "2",    memory: "3Gi" }
+        requests: { cpu: "100m", memory: "512Mi" }
+        limits:   { cpu: "2",    memory: "2Gi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
         - { name: maven-cache,      mountPath: /root/.m2 }
@@ -94,8 +96,8 @@ spec:
       args: ["infinity"]
       tty: true
       resources:
-        requests: { cpu: "500m", memory: "1Gi" }
-        limits:   { cpu: "2",    memory: "3Gi" }
+        requests: { cpu: "100m", memory: "512Mi" }
+        limits:   { cpu: "2",    memory: "2Gi" }
       env:
         - name: AWS_SDK_LOAD_CONFIG
           value: "true"
@@ -111,7 +113,7 @@ spec:
       tty: true
       entrypoint: [""]
       resources:
-        requests: { cpu: "100m", memory: "256Mi" }
+        requests: { cpu: "50m",  memory: "128Mi" }
         limits:   { cpu: "500m", memory: "512Mi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
@@ -123,7 +125,7 @@ spec:
       args: ["infinity"]
       tty: true
       resources:
-        requests: { cpu: "200m", memory: "512Mi" }
+        requests: { cpu: "50m",  memory: "256Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
