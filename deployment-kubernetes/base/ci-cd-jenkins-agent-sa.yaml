@@ -1,0 +1,29 @@
+# ============================================
+# Shopease: ServiceAccount used by Jenkins BUILD
+# AGENT PODS (NOT the controller).
+#
+# Author: Sanket Mule
+# --------------------------------------------
+# Each ephemeral build pod spawned by the
+# Jenkins Kubernetes plugin runs AS this SA.
+#
+# Today: plain SA, no AWS perms (pods inherit
+#        node IAM role for ECR/S3 — temporary).
+#
+# Next (Step 6): annotate this SA with
+#   eks.amazonaws.com/role-arn: <ci-agent-role-arn>
+# so build pods get scoped AWS creds via IRSA
+# (ECR push + S3 put + nothing else).
+# ============================================
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-agent-builder
+  namespace: jenkins-cicd-agents
+  labels:
+    app.kubernetes.io/part-of: jenkins-ci
+    app.kubernetes.io/component: build-agent
+  # annotations:
+  #   # Uncomment in Step 6 after IRSA role is created.
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::483829975256:role/ci-agent-shopease
