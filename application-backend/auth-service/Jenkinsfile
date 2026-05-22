@@ -1,10 +1,10 @@
 @Library('shopease-jenkins-library') _
 
-pipeline {
-    agent {
+pipeline {    agent {
         kubernetes {
             yaml shopeaseAgent(serviceName: 'auth-service')
             defaultContainer 'jnlp'
+            showRawYaml false
         }
     }
 
@@ -35,7 +35,7 @@ pipeline {
                             script: 'aws sts get-caller-identity --query Account --output text',
                             returnStdout: true
                         ).trim()       
-                                         
+
                         env.ECR_REPO  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO_NAME}"
                         // GIT_COMMIT is populated by the implicit `checkout scm`
                         // performed before stages start. Use it instead of
@@ -80,13 +80,10 @@ pipeline {
                             --no-progress \
                             --format json \
                             --output "${WORKSPACE}/trivy-secrets-report.json" \
-                            "application-backend/${SERVICE_NAME}"
-
-                        echo ""
+                            "application-backend/${SERVICE_NAME}"                        echo ""
                         echo "-- Secret findings ----------------------------"
                         trivy convert \
                             --format table \
-                            --scanners secret \
                             "${WORKSPACE}/trivy-secrets-report.json"
 
                         echo "\\033[1;32mSUCCESS: No secrets detected.\\033[0m"
@@ -121,14 +118,11 @@ pipeline {
                             --no-progress \
                             --format json \
                             --output "${WORKSPACE}/trivy-fs-report.json" \
-                            "application-backend/${SERVICE_NAME}"
-
-                        echo ""
+                            "application-backend/${SERVICE_NAME}"                        echo ""
                         echo "-- Findings (HIGH / CRITICAL only) ------------"
                         trivy convert \
                             --format table \
                             --severity HIGH,CRITICAL \
-                            --scanners vuln \
                             "${WORKSPACE}/trivy-fs-report.json"
 
                         echo ""
