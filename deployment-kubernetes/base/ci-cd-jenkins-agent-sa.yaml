@@ -27,3 +27,6 @@ metadata:
   # annotations:
   #   # Uncomment in Step 6 after IRSA role is created.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::483829975256:role/ci-agent-shopease
+
+
+
