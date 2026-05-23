@@ -193,7 +193,9 @@ pipeline {
                     script {
                         logger.stageHeader('Image Build & Push (Kaniko)')
                         logger.logInfo("Building & pushing : ${env.IMAGE_URI}")
-                    }                    sh '''
+                    }
+                                        
+                    sh '''
                         set -e
                         /kaniko/executor \
                             --context "${WORKSPACE}/application-backend" \
