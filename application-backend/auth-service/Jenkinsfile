@@ -16,7 +16,7 @@ pipeline {
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
     }    
-    
+
     environment {
         SERVICE_NAME    = 'auth-service'
         AWS_REGION      = 'ap-south-1'
@@ -193,15 +193,12 @@ pipeline {
                     script {
                         logger.stageHeader('Image Build & Push (Kaniko)')
                         logger.logInfo("Building & pushing : ${env.IMAGE_URI}")
-                    }
-
-                    sh '''
+                    }                    sh '''
                         set -e
                         /kaniko/executor \
                             --context "${WORKSPACE}/application-backend" \
                             --dockerfile "${SERVICE_NAME}/Dockerfile" \
                             --destination "${IMAGE_URI}" \
-                            --destination "${ECR_REPO}:${SAFE_BRANCH}-latest" \
                             --label "git.sha=${GIT_SHA}" \
                             --label "git.branch=${SAFE_BRANCH}" \
                             --label "build.number=${BUILD_NUMBER}" \
@@ -360,9 +357,7 @@ pipeline {
                             --image-ids "imageTag=${GIT_SHA}" \
                             --region "${AWS_REGION}" \
                             --query 'imageDetails[0].imageDigest' \
-                            --output text 2>/dev/null || echo "unknown")
-
-                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
+                            --output text 2>/dev/null || echo "unknown")                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
                         cat > "${MANIFEST}" <<EOF
 {
   "service": "${SERVICE_NAME}",
@@ -375,7 +370,6 @@ pipeline {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "image": {
     "uri": "${IMAGE_URI}",
-    "latestTag": "${ECR_REPO}:${SAFE_BRANCH}-latest",
     "digest": "${IMAGE_DIGEST}"
   },
   "artifacts": {
@@ -392,6 +386,34 @@ EOF
                         aws s3 cp "${MANIFEST}" "${BASE}/manifests/${PREFIX}-manifest.json" \
                             --content-type application/json \
                             --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
+
+                        # ----------------------------------------------------
+                        # 5. Floating pointer: latest successful build per branch
+                        #    ECR tags are IMMUTABLE, so the "latest" concept
+                        #    lives in S3 (versioned + auditable) instead.
+                        #    Deployments resolve gitSha from this file, then
+                        #    pull the immutable :<gitSha> tag from ECR.
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Updating branch pointer -------------------"
+                        POINTER="${WORKSPACE}/${SAFE_BRANCH}-latest.json"
+                        cat > "${POINTER}" <<EOF
+{
+  "service": "${SERVICE_NAME}",
+  "branch": "${SAFE_BRANCH}",
+  "gitSha": "${GIT_SHA}",
+  "buildNumber": "${BUILD_NUMBER}",
+  "imageUri": "${IMAGE_URI}",
+  "imageDigest": "${IMAGE_DIGEST}",
+  "manifest": "${BASE}/manifests/${PREFIX}-manifest.json",
+  "updatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+                        aws s3 cp "${POINTER}" "${BASE}/latest/${SAFE_BRANCH}.json" \
+                            --content-type application/json \
+                            --metadata "service=${SERVICE_NAME},branch=${SAFE_BRANCH},git-sha=${GIT_SHA}"
+                        rm -f "${POINTER}"
 
                         echo ""
                         echo "-- Listing uploaded objects ------------------"
@@ -433,8 +455,8 @@ EOF
  BUILD SUMMARY
 ============================================================
  Service     : ${env.SERVICE_NAME}
- Branch      : ${env.BRANCH_NAME}
- Git SHA     : ${env.GIT_SHA} Image URI   : ${env.IMAGE_URI}
+ Branch      : ${env.BRANCH_NAME} Git SHA     : ${env.GIT_SHA}
+ Image URI   : ${env.IMAGE_URI}
  Build #     : ${env.BUILD_NUMBER}
  Agent pod   : ${env.NODE_NAME}
  Artifacts   : s3://${env.ARTIFACT_BUCKET}/${env.SERVICE_NAME}/ (prefix: ${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER})
