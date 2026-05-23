@@ -35,12 +35,9 @@ pipeline {
                         env.AWS_ACCOUNT_ID = sh(
                             script: 'aws sts get-caller-identity --query Account --output text',
                             returnStdout: true
-                        ).trim()       
+                        ).trim()
 
                         env.ECR_REPO  = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO_NAME}"
-                        // GIT_COMMIT is populated by the implicit `checkout scm`
-                        // performed before stages start. Use it instead of
-                        // shelling out to `git` (not installed in aws image).
                         env.GIT_SHA   = (env.GIT_COMMIT ?: 'unknown').take(7)
                         env.IMAGE_TAG = "${env.GIT_SHA}"
                         env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
@@ -73,7 +70,7 @@ pipeline {
                     sh '''
                         set -e
                         echo "-- Running trivy secret scan ------------------"
-                        trivy --version                        
+                        trivy --version
                         trivy fs \
                             --scanners secret \
                             --exit-code 1 \
@@ -111,7 +108,7 @@ pipeline {
                     sh '''
                         set -e
                         echo "-- Running trivy fs (vuln) --------------------"
-                        trivy --version                        
+                        trivy --version
                         trivy fs \
                             --scanners vuln \
                             --severity HIGH,CRITICAL \
@@ -215,14 +212,13 @@ pipeline {
                     '''
                 }
             }
-        }        stage('Image Vulnerability Scan') {
+        }
+
+        stage('Image Vulnerability Scan') {
             steps {
                 container('tools') {
                     script { logger.stageHeader('Image Vulnerability Scan - Trivy image (ECR)') }
 
-                    // Trivy uses the AWS SDK; EKS injects IRSA env vars
-                    // (AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE) so it
-                    // can pull the image from ECR without extra config.
                     retry(2) {
                         sh '''
                             set -e
