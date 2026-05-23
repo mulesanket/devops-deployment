@@ -462,7 +462,8 @@ EOF
                     echo """
 ============================================================
  BUILD SUMMARY
-============================================================ Service     : ${env.SERVICE_NAME}
+============================================================
+ Service     : ${env.SERVICE_NAME}
  Branch      : ${env.BRANCH_NAME}
  Git SHA     : ${env.GIT_SHA}
  Image URI   : ${env.IMAGE_URI}
