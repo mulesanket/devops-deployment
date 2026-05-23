@@ -15,13 +15,12 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
-    }
-
-    environment {
-        SERVICE_NAME  = 'auth-service'
-        AWS_REGION    = 'ap-south-1'
-        ECR_REPO_NAME = "shopease-webapp-development-${SERVICE_NAME}"
-        SAFE_BRANCH   = "${env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceAll('^origin/', '') ?: 'development'}"
+    }    environment {
+        SERVICE_NAME    = 'auth-service'
+        AWS_REGION      = 'ap-south-1'
+        ECR_REPO_NAME   = "shopease-webapp-development-${SERVICE_NAME}"
+        SAFE_BRANCH     = "${env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceAll('^origin/', '') ?: 'development'}"
+        ARTIFACT_BUCKET = 'shopease-webapp-development-ci-artifacts'
     }
 
     stages {
@@ -277,6 +276,140 @@ pipeline {
             }
         }
 
+        stage('Publish Artifacts to S3') {
+            steps {
+                container('aws') {
+                    script {
+                        logger.stageHeader('Publish Artifacts to S3')
+                        logger.logInfo("Bucket   : s3://${env.ARTIFACT_BUCKET}")
+                        logger.logInfo("Prefix   : ${env.SERVICE_NAME}/")
+                        logger.logInfo("Pattern  : ${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER}-<type>.<ext>")
+                    }
+
+                    sh '''
+                        set -e
+
+                        BASE="s3://${ARTIFACT_BUCKET}/${SERVICE_NAME}"
+                        PREFIX="${SERVICE_NAME}-${GIT_SHA}-${BUILD_NUMBER}"
+
+                        # ----------------------------------------------------
+                        # 1. JAR artifact (from maven build output)
+                        # ----------------------------------------------------
+                        echo "-- Locating JAR ------------------------------"
+                        JAR_FILE=$(find application-backend/${SERVICE_NAME}/target \
+                            -maxdepth 1 -type f -name "*.jar" \
+                            ! -name "*-sources.jar" ! -name "*-javadoc.jar" \
+                            | head -1 || true)
+
+                        if [ -n "${JAR_FILE}" ] && [ -f "${JAR_FILE}" ]; then
+                            DEST="${BASE}/jars/${PREFIX}.jar"
+                            echo "Uploading ${JAR_FILE} -> ${DEST}"
+                            aws s3 cp "${JAR_FILE}" "${DEST}" \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},branch=${SAFE_BRANCH}"
+                        else
+                            echo "WARN: no JAR found under target/ - skipping"
+                        fi
+
+                        # ----------------------------------------------------
+                        # 2. Trivy reports
+                        # ----------------------------------------------------
+                        upload_report() {
+                            SRC="$1"; SUBDIR="$2"; SUFFIX="$3"
+                            if [ -f "${SRC}" ]; then
+                                DEST="${BASE}/reports/${SUBDIR}/${PREFIX}-${SUFFIX}.json"
+                                echo "Uploading ${SRC} -> ${DEST}"
+                                aws s3 cp "${SRC}" "${DEST}" \
+                                    --content-type application/json \
+                                    --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},report=${SUFFIX}"
+                            else
+                                echo "WARN: ${SRC} not found - skipping"
+                            fi
+                        }
+
+                        echo ""
+                        echo "-- Uploading scan reports --------------------"
+                        upload_report "${WORKSPACE}/trivy-secrets-report.json" "secrets"      "secrets"
+                        upload_report "${WORKSPACE}/trivy-fs-report.json"      "dependencies" "deps"
+                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"
+
+                        # ----------------------------------------------------
+                        # 3. JUnit / surefire reports (tarball)
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Bundling test reports ---------------------"
+                        TEST_TGZ="${WORKSPACE}/${PREFIX}-junit.tar.gz"
+                        if find application-backend/${SERVICE_NAME} -type d -name surefire-reports | grep -q .; then
+                            tar -czf "${TEST_TGZ}" \
+                                $(find application-backend/${SERVICE_NAME} -type d -name surefire-reports)
+                            aws s3 cp "${TEST_TGZ}" "${BASE}/reports/tests/${PREFIX}-junit.tar.gz" \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
+                            rm -f "${TEST_TGZ}"
+                        else
+                            echo "WARN: no surefire-reports found - skipping"
+                        fi
+
+                        # ----------------------------------------------------
+                        # 4. Build manifest (single source of truth)
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Resolving image digest --------------------"
+                        IMAGE_DIGEST=$(aws ecr describe-images \
+                            --repository-name "${ECR_REPO_NAME}" \
+                            --image-ids "imageTag=${GIT_SHA}" \
+                            --region "${AWS_REGION}" \
+                            --query 'imageDetails[0].imageDigest' \
+                            --output text 2>/dev/null || echo "unknown")
+
+                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
+                        cat > "${MANIFEST}" <<EOF
+{
+  "service": "${SERVICE_NAME}",
+  "branch": "${SAFE_BRANCH}",
+  "gitSha": "${GIT_SHA}",
+  "gitCommit": "${GIT_COMMIT}",
+  "buildNumber": "${BUILD_NUMBER}",
+  "buildUrl": "${BUILD_URL}",
+  "jobName": "${JOB_NAME}",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "image": {
+    "uri": "${IMAGE_URI}",
+    "latestTag": "${ECR_REPO}:${SAFE_BRANCH}-latest",
+    "digest": "${IMAGE_DIGEST}"
+  },
+  "artifacts": {
+    "jar":             "${BASE}/jars/${PREFIX}.jar",
+    "secretsReport":   "${BASE}/reports/secrets/${PREFIX}-secrets.json",
+    "depsReport":      "${BASE}/reports/dependencies/${PREFIX}-deps.json",
+    "imageReport":     "${BASE}/reports/image/${PREFIX}-image.json",
+    "testReports":     "${BASE}/reports/tests/${PREFIX}-junit.tar.gz"
+  }
+}
+EOF
+
+                        echo "Uploading manifest -> ${BASE}/manifests/${PREFIX}-manifest.json"
+                        aws s3 cp "${MANIFEST}" "${BASE}/manifests/${PREFIX}-manifest.json" \
+                            --content-type application/json \
+                            --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
+
+                        echo ""
+                        echo "-- Listing uploaded objects ------------------"
+                        aws s3 ls "${BASE}/" --recursive --human-readable | grep "${PREFIX}" || true
+
+                        echo "SUCCESS: All artifacts published to S3."
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER}-manifest.json",
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+                success { script { logger.logSuccess('Artifacts published to S3') } }
+                failure { script { logger.logError('S3 publish failed - check IRSA s3:PutObject perms') } }
+            }
+        }
+
         stage('Verify ECR Push') {
             steps {
                 container('aws') {
@@ -299,10 +432,10 @@ pipeline {
 ============================================================
  Service     : ${env.SERVICE_NAME}
  Branch      : ${env.BRANCH_NAME}
- Git SHA     : ${env.GIT_SHA}
- Image URI   : ${env.IMAGE_URI}
+ Git SHA     : ${env.GIT_SHA} Image URI   : ${env.IMAGE_URI}
  Build #     : ${env.BUILD_NUMBER}
  Agent pod   : ${env.NODE_NAME}
+ Artifacts   : s3://${env.ARTIFACT_BUCKET}/${env.SERVICE_NAME}/ (prefix: ${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER})
  Result      : ${currentBuild.currentResult}
 ============================================================
 """
