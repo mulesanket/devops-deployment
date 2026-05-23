@@ -215,6 +215,70 @@ pipeline {
                     '''
                 }
             }
+        }        stage('Image Vulnerability Scan') {
+            steps {
+                container('tools') {
+                    script { logger.stageHeader('Image Vulnerability Scan - Trivy image (ECR)') }
+
+                    // Trivy uses the AWS SDK; EKS injects IRSA env vars
+                    // (AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE) so it
+                    // can pull the image from ECR without extra config.
+                    retry(2) {
+                        sh '''
+                            set -e
+                            echo "-- Running trivy image ------------------------"
+                            trivy --version
+
+                            export TMPDIR="${WORKSPACE}/.trivy-tmp"
+                            mkdir -p "${TMPDIR}"
+
+                            trivy image \
+                                --scanners vuln \
+                                --severity HIGH,CRITICAL \
+                                --ignore-unfixed \
+                                --exit-code 0 \
+                                --no-progress \
+                                --format json \
+                                --output "${WORKSPACE}/trivy-image-report.json" \
+                                "${IMAGE_URI}"
+                        '''
+                    }
+
+                    sh '''
+                        set -e
+                        echo ""
+                        echo "-- Findings (HIGH / CRITICAL, fixed-only) -----"
+                        trivy convert \
+                            --format table \
+                            --severity HIGH,CRITICAL \
+                            "${WORKSPACE}/trivy-image-report.json"
+
+                        echo ""
+                        echo "-- Gate (fail on fixable HIGH/CRITICAL) -------"
+                        trivy image \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --exit-code 1 \
+                            --no-progress \
+                            --quiet \
+                            "${IMAGE_URI}"
+
+                        echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
+                    '''
+                }
+            }
+            post {
+                always {
+                    script { logger.logWarning('Archiving trivy image report if available') }
+                    archiveArtifacts artifacts: 'trivy-image-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
+                }
+                success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
+                failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
+            }
         }
 
         stage('Verify ECR Push') {
