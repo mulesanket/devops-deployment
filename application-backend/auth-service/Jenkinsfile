@@ -15,7 +15,9 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
-    }    environment {
+    }    
+    
+    environment {
         SERVICE_NAME    = 'auth-service'
         AWS_REGION      = 'ap-south-1'
         ECR_REPO_NAME   = "shopease-webapp-development-${SERVICE_NAME}"
