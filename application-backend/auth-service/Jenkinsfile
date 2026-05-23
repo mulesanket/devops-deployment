@@ -194,7 +194,7 @@ pipeline {
                         logger.stageHeader('Image Build & Push (Kaniko)')
                         logger.logInfo("Building & pushing : ${env.IMAGE_URI}")
                     }
-                                        
+
                     sh '''
                         set -e
                         /kaniko/executor \
@@ -331,20 +331,25 @@ pipeline {
                         echo "-- Uploading scan reports --------------------"
                         upload_report "${WORKSPACE}/trivy-secrets-report.json" "secrets"      "secrets"
                         upload_report "${WORKSPACE}/trivy-fs-report.json"      "dependencies" "deps"
-                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"
-
+                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"                        
                         # ----------------------------------------------------
-                        # 3. JUnit / surefire reports (tarball)
+                        # 3. JUnit / surefire reports
+                        #    Uploaded as a flat directory of XMLs (the aws-cli
+                        #    container has no `tar`). One prefix per build:
+                        #    reports/tests/<service>-<sha>-<build>/<TEST>.xml
                         # ----------------------------------------------------
                         echo ""
-                        echo "-- Bundling test reports ---------------------"
-                        TEST_TGZ="${WORKSPACE}/${PREFIX}-junit.tar.gz"
-                        if find application-backend/${SERVICE_NAME} -type d -name surefire-reports | grep -q .; then
-                            tar -czf "${TEST_TGZ}" \
-                                $(find application-backend/${SERVICE_NAME} -type d -name surefire-reports)
-                            aws s3 cp "${TEST_TGZ}" "${BASE}/reports/tests/${PREFIX}-junit.tar.gz" \
+                        echo "-- Uploading test reports --------------------"
+                        SUREFIRE_DIR=$(find application-backend/${SERVICE_NAME} -type d -name surefire-reports | head -1)
+                        if [ -n "${SUREFIRE_DIR}" ] && [ -d "${SUREFIRE_DIR}" ]; then
+                            TEST_DEST="${BASE}/reports/tests/${PREFIX}/"
+                            echo "Syncing ${SUREFIRE_DIR}/ -> ${TEST_DEST}"
+                            aws s3 cp "${SUREFIRE_DIR}/" "${TEST_DEST}" \
+                                --recursive \
+                                --exclude "*" \
+                                --include "*.xml" \
+                                --include "*.txt" \
                                 --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
-                            rm -f "${TEST_TGZ}"
                         else
                             echo "WARN: no surefire-reports found - skipping"
                         fi
@@ -359,7 +364,9 @@ pipeline {
                             --image-ids "imageTag=${GIT_SHA}" \
                             --region "${AWS_REGION}" \
                             --query 'imageDetails[0].imageDigest' \
-                            --output text 2>/dev/null || echo "unknown")                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
+                            --output text 2>/dev/null || echo "unknown")
+
+                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
                         cat > "${MANIFEST}" <<EOF
 {
   "service": "${SERVICE_NAME}",
@@ -379,7 +386,7 @@ pipeline {
     "secretsReport":   "${BASE}/reports/secrets/${PREFIX}-secrets.json",
     "depsReport":      "${BASE}/reports/dependencies/${PREFIX}-deps.json",
     "imageReport":     "${BASE}/reports/image/${PREFIX}-image.json",
-    "testReports":     "${BASE}/reports/tests/${PREFIX}-junit.tar.gz"
+    "testReports":     "${BASE}/reports/tests/${PREFIX}/"
   }
 }
 EOF
@@ -455,9 +462,9 @@ EOF
                     echo """
 ============================================================
  BUILD SUMMARY
-============================================================
- Service     : ${env.SERVICE_NAME}
- Branch      : ${env.BRANCH_NAME} Git SHA     : ${env.GIT_SHA}
+============================================================ Service     : ${env.SERVICE_NAME}
+ Branch      : ${env.BRANCH_NAME}
+ Git SHA     : ${env.GIT_SHA}
  Image URI   : ${env.IMAGE_URI}
  Build #     : ${env.BUILD_NUMBER}
  Agent pod   : ${env.NODE_NAME}
