@@ -47,11 +47,17 @@ def call(Map cfg = [:]) {
     String serviceName = cfg.serviceName ?: error('shopeaseDeployer: serviceName is required')
 
     String namespace      = cfg.namespace      ?: 'jenkins-cicd-agents'
-    String serviceAccount = cfg.serviceAccount ?: 'jenkins-agent-builder'
-    String awsImage       = cfg.awsImage       ?: 'amazon/aws-cli:2.17.18'
-    // bitnami/kubectl is small (~80MB) and pinned to a K8s minor release.
-    // Keep its minor version within +/-1 of the EKS control plane version.
-    String kubectlImage   = cfg.kubectlImage   ?: 'bitnami/kubectl:1.30'
+    String serviceAccount = cfg.serviceAccount ?: 'jenkins-agent-builder'    String awsImage       = cfg.awsImage       ?: 'amazon/aws-cli:2.17.18'
+    // kubectl image: rancher/kubectl is small, public, well-maintained, and
+    // pinned to a K8s patch release. Keep the minor version within +/-1 of
+    // the EKS control plane minor version (currently 1.30 in dev).
+    //
+    // History: we originally used `bitnami/kubectl:1.30` but Bitnami removed
+    // most of their public Docker Hub tags in 2025 (the `:1.30` floating tag
+    // returned `not found` and the pod stuck in ImagePullBackOff). Rancher's
+    // image is the cleanest drop-in replacement: runs as root by default
+    // (no UID juggling), single binary, no extra layers.
+    String kubectlImage   = cfg.kubectlImage   ?: 'rancher/kubectl:v1.30.7'
     String jnlpImage      = cfg.jnlpImage      ?: 'jenkins/inbound-agent:latest'
 
     return """
@@ -101,17 +107,14 @@ spec:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
         - name: kube-config
-          mountPath: /root/.kube
-    - name: kubectl
+          mountPath: /root/.kube    - name: kubectl
       image: ${kubectlImage}
       command: ["sleep"]
       args: ["infinity"]
       tty: true
-      # bitnami/kubectl images run as non-root (UID 1001) by default,
-      # which clashes with the root-owned shared workspace + kubeconfig
-      # written by the aws container. Override to root for parity.
-      securityContext:
-        runAsUser: 0
+      # rancher/kubectl runs as root by default - no securityContext override
+      # needed (unlike bitnami images which run as UID 1001 and would clash
+      # with the root-owned shared kubeconfig written by the `aws` container).
       resources:
         requests:
           cpu: "50m"
