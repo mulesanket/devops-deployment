@@ -1,0 +1,43 @@
+# ============================================
+# Shopease: gp3 StorageClass (default)
+#
+# Author: Sanket Mule
+# --------------------------------------------
+# Purpose:
+#   Recipe for dynamically provisioning EBS gp3 volumes when a PVC asks
+#   for storageClassName: gp3. Used by Jenkins agent cache PVCs (Maven,
+#   Trivy) and any future workload that needs persistent block storage.
+#
+# Why these settings:
+#   - provisioner: ebs.csi.aws.com
+#       The EBS CSI driver registers itself under this name. Fixed.
+#   - volumeBindingMode: WaitForFirstConsumer
+#       EBS volumes are single-AZ. Delay provisioning until a pod is
+#       scheduled so the volume lands in the same AZ as the pod. Without
+#       this, the volume might be created in a different AZ and the pod
+#       cannot mount it (cross-AZ attach is impossible for EBS).
+#   - reclaimPolicy: Retain
+#       If a PVC is deleted (accident or cleanup), the underlying EBS
+#       volume stays. We can re-bind it manually instead of losing the
+#       Maven/Trivy cache. Safer default for cache volumes.
+#   - is-default-class: "true"
+#       Any PVC that omits storageClassName will use gp3.
+#
+# Resources created when this is applied:
+#   - 1 StorageClass named "gp3" (cluster-scoped, no namespace)
+#   - NO EBS volume yet - that happens when a PVC + Pod ask for one
+# ============================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"

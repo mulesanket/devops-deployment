@@ -9,7 +9,7 @@
   database_name               = "shopease"
   master_username             = "shopease_admin"
   master_password             = var.db_master_password
-  engine_version              = "17.5"
+  engine_version              = "17.7"
   serverless_min_capacity     = 1
   serverless_max_capacity     = 2
   instance_count              = 1
