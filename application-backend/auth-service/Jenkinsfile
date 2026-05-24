@@ -15,14 +15,23 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
-    }    
-
+    }        
+    
     environment {
         SERVICE_NAME    = 'auth-service'
         AWS_REGION      = 'ap-south-1'
         ECR_REPO_NAME   = "shopease-webapp-development-${SERVICE_NAME}"
         SAFE_BRANCH     = "${env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceAll('^origin/', '') ?: 'development'}"
         ARTIFACT_BUCKET = 'shopease-webapp-development-ci-artifacts'
+
+        // S3 tarball cache locations (industry pattern: GitHub Actions cache,
+        // GitLab CI cache, AWS CodeBuild S3 cache all do the same).
+        // Why S3 over EBS PVC: multi-AZ for free, no AZ pinning, no RWO
+        // contention with parallel builds, no orphan-volume cleanup.
+        // Maven cache is per-service (avoid cross-service dep pollution).
+        // Trivy DB cache is shared (CVE data is service-agnostic).
+        CACHE_S3_M2    = "s3://shopease-webapp-development-ci-artifacts/_caches/${SERVICE_NAME}/m2.tar.gz"
+        CACHE_S3_TRIVY = "s3://shopease-webapp-development-ci-artifacts/_caches/_shared/trivy-db.tar.gz"
     }
 
     stages {
@@ -55,11 +64,80 @@ pipeline {
                         sh '''
                             echo "-- IRSA caller identity (should be ci-agent-irsa) --"
                             aws sts get-caller-identity --output table
-                        '''
-
-                        logger.logSuccess('Setup & Environment completed')
+                        '''                        logger.logSuccess('Setup & Environment completed')
                     }
                 }
+            }
+        }
+
+        stage('Restore Caches') {
+            steps {
+                container('aws') {
+                    script { logger.stageHeader('Restore Caches from S3') }
+
+                    // Stream tarballs from S3 into workspace. The actual extraction
+                    // happens in containers that have `tar` (maven, tools) - the
+                    // aws-cli container has no tar binary. We extract via shared
+                    // workspace volume in the next steps.
+                    sh '''
+                        set +e
+                        mkdir -p "${WORKSPACE}/.cache"
+
+                        echo "-- Restoring Maven .m2 cache from S3 ---------"
+                        if aws s3 cp "${CACHE_S3_M2}" "${WORKSPACE}/.cache/m2.tar.gz" --no-progress 2>/dev/null; then
+                            ls -lh "${WORKSPACE}/.cache/m2.tar.gz"
+                            echo "Maven cache tarball downloaded."
+                        else
+                            echo "WARN: no Maven cache in S3 yet (first build for this service). Continuing cold."
+                        fi
+
+                        echo ""
+                        echo "-- Restoring Trivy DB cache from S3 ----------"
+                        if aws s3 cp "${CACHE_S3_TRIVY}" "${WORKSPACE}/.cache/trivy-db.tar.gz" --no-progress 2>/dev/null; then
+                            ls -lh "${WORKSPACE}/.cache/trivy-db.tar.gz"
+                            echo "Trivy cache tarball downloaded."
+                        else
+                            echo "WARN: no Trivy cache in S3 yet. Continuing cold."
+                        fi
+
+                        exit 0
+                    '''
+                }
+
+                container('maven') {
+                    sh '''
+                        set +e
+                        if [ -f "${WORKSPACE}/.cache/m2.tar.gz" ]; then
+                            mkdir -p /root/.m2
+                            echo "-- Extracting Maven cache into /root/.m2 -----"
+                            tar -xzf "${WORKSPACE}/.cache/m2.tar.gz" -C /root/.m2
+                            echo "Maven cache restored. Contents:"
+                            du -sh /root/.m2/repository 2>/dev/null || true
+                        else
+                            echo "No Maven cache to extract; skipping."
+                        fi
+                        exit 0
+                    '''
+                }
+
+                container('tools') {
+                    sh '''
+                        set +e
+                        if [ -f "${WORKSPACE}/.cache/trivy-db.tar.gz" ]; then
+                            mkdir -p /root/.cache/trivy
+                            echo "-- Extracting Trivy DB cache into /root/.cache/trivy --"
+                            # Trivy image has `tar` baked in
+                            tar -xzf "${WORKSPACE}/.cache/trivy-db.tar.gz" -C /root/.cache/trivy
+                            echo "Trivy cache restored. Contents:"
+                            du -sh /root/.cache/trivy 2>/dev/null || true
+                        else
+                            echo "No Trivy cache to extract; skipping."
+                        fi
+                        exit 0
+                    '''
+                }
+
+                script { logger.logSuccess('Restore Caches completed (cache misses are non-fatal)') }
             }
         }
 
@@ -271,9 +349,69 @@ pipeline {
                                      allowEmptyArchive: true,
                                      fingerprint: true
                     sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
-                }
+                }                
                 success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
                 failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
+            }
+        }
+
+        stage('Save Caches') {
+            // Repack and upload caches back to S3 so the NEXT build is warm.
+            // We do this only after all gates pass to avoid poisoning the
+            // cache with broken-build state.
+            steps {
+                container('maven') {
+                    script { logger.stageHeader('Save Caches to S3') }
+                    sh '''
+                        set +e
+                        if [ -d /root/.m2/repository ]; then
+                            echo "-- Packing Maven cache ----------------------"
+                            du -sh /root/.m2/repository
+                            tar -czf "${WORKSPACE}/.cache/m2.tar.gz" -C /root/.m2 repository
+                            ls -lh "${WORKSPACE}/.cache/m2.tar.gz"
+                        else
+                            echo "WARN: /root/.m2/repository missing - skipping Maven cache save"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                container('tools') {
+                    sh '''
+                        set +e
+                        if [ -d /root/.cache/trivy ]; then
+                            echo "-- Packing Trivy DB cache -------------------"
+                            du -sh /root/.cache/trivy
+                            tar -czf "${WORKSPACE}/.cache/trivy-db.tar.gz" -C /root/.cache/trivy .
+                            ls -lh "${WORKSPACE}/.cache/trivy-db.tar.gz"
+                        else
+                            echo "WARN: /root/.cache/trivy missing - skipping Trivy cache save"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                container('aws') {
+                    sh '''
+                        set +e
+                        if [ -f "${WORKSPACE}/.cache/m2.tar.gz" ]; then
+                            echo "-- Uploading Maven cache to S3 --------------"
+                            aws s3 cp "${WORKSPACE}/.cache/m2.tar.gz" "${CACHE_S3_M2}" \
+                                --no-progress \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},type=m2-cache"
+                        fi
+
+                        if [ -f "${WORKSPACE}/.cache/trivy-db.tar.gz" ]; then
+                            echo "-- Uploading Trivy cache to S3 --------------"
+                            aws s3 cp "${WORKSPACE}/.cache/trivy-db.tar.gz" "${CACHE_S3_TRIVY}" \
+                                --no-progress \
+                                --metadata "git-sha=${GIT_SHA},build=${BUILD_NUMBER},type=trivy-db-cache"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                script { logger.logSuccess('Save Caches completed') }
             }
         }
 

@@ -30,8 +30,9 @@
 //   tools  — gitleaks + trivy + jq + git in one small image
 //
 // All containers share the workspace volume at
-// /home/jenkins/agent. Maven cache is a PVC at
-// /root/.m2 so dependencies survive between builds.
+// /home/jenkins/agent. Maven (.m2) and Trivy DB caches are repopulated
+// per build from S3 tarballs (see Jenkinsfile "Restore Caches" stage and
+// docs/jenkins/04-caching-strategy.md for the design rationale).
 // ============================================
 
 def call(Map cfg = [:]) {
@@ -43,10 +44,8 @@ def call(Map cfg = [:]) {
     String serviceAccount   = cfg.serviceAccount   ?: 'jenkins-agent-builder'
     String mavenImage       = cfg.mavenImage       ?: 'maven:3.9-eclipse-temurin-21'
     String kanikoImage      = cfg.kanikoImage      ?: 'gcr.io/kaniko-project/executor:v1.23.2-debug'
-    String awsImage         = cfg.awsImage         ?: 'amazon/aws-cli:2.17.18'
-    String toolsImage       = cfg.toolsImage       ?: 'aquasec/trivy:0.55.0'   // has trivy + jq baked in; we add gitleaks via initContainer
+    String awsImage         = cfg.awsImage         ?: 'amazon/aws-cli:2.17.18'    String toolsImage       = cfg.toolsImage       ?: 'aquasec/trivy:0.55.0'   // has trivy + jq baked in; we add gitleaks via initContainer
     String jnlpImage        = cfg.jnlpImage        ?: 'jenkins/inbound-agent:latest'
-    String mavenCachePvc    = cfg.mavenCachePvc    ?: 'jenkins-maven-cache'
 
     return """
 apiVersion: v1
@@ -128,18 +127,18 @@ spec:
         requests: { cpu: "50m",  memory: "256Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
       volumeMounts:
-        - { name: workspace-volume, mountPath: /home/jenkins/agent }
-  volumes:
+        - { name: workspace-volume, mountPath: /home/jenkins/agent }  volumes:
     - name: workspace-volume
       emptyDir: {}
-    # NOTE: Maven cache is currently emptyDir (per-build, no persistence).
-    # To enable a persistent cache across builds:
-    #   1. Install the AWS EBS CSI driver add-on on the EKS cluster
-    #   2. Create a gp3 StorageClass
-    #   3. Apply ci-cd-jenkins-maven-cache-pvc.yaml
-    #   4. Replace this emptyDir with:
-    #        persistentVolumeClaim:
-    #          claimName: ${mavenCachePvc}
+    # NOTE: All cache volumes are emptyDir (per-pod, ephemeral).
+    # Cross-build cache persistence is handled at the application level
+    # via S3 tarball cache in the Jenkinsfile (see "Restore Caches" and
+    # "Save Caches" stages). Reasoning:
+    #   - S3 is multi-AZ; an EBS PVC would pin builds to one AZ.
+    #   - S3 supports unlimited parallel readers; EBS RWO blocks parallel
+    #     builds on the same volume.
+    #   - No PVC orphan cleanup, no CSI driver dependency in the hot path.
+    # See docs/jenkins/04-caching-strategy.md for the full decision record.
     - name: maven-cache
       emptyDir: {}
     - name: kaniko-cache
