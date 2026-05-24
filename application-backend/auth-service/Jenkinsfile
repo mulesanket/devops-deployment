@@ -64,7 +64,8 @@ pipeline {
                         sh '''
                             echo "-- IRSA caller identity (should be ci-agent-irsa) --"
                             aws sts get-caller-identity --output table
-                        '''                        logger.logSuccess('Setup & Environment completed')
+                        '''                        
+                        logger.logSuccess('Setup & Environment completed')
                     }
                 }
             }
