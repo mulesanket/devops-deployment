@@ -100,10 +100,10 @@ spec:
           memory: "128Mi"
         limits:
           cpu: "500m"
-          memory: "512Mi"
-      env:
+          memory: "512Mi"      env:
         - name: AWS_SDK_LOAD_CONFIG
-          value: "true"      volumeMounts:
+          value: "true"
+      volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
         - name: kube-config
