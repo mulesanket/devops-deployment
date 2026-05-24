@@ -103,12 +103,12 @@ spec:
           memory: "512Mi"
       env:
         - name: AWS_SDK_LOAD_CONFIG
-          value: "true"
-      volumeMounts:
+          value: "true"      volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
         - name: kube-config
-          mountPath: /root/.kube    - name: kubectl
+          mountPath: /root/.kube
+    - name: kubectl
       image: ${kubectlImage}
       command: ["sleep"]
       args: ["infinity"]
