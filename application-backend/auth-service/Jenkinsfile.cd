@@ -1,0 +1,430 @@
+@Library('shopease-jenkins-library') _
+
+// ============================================
+// Shopease auth-service - CD pipeline
+//
+// Author: Sanket Mule
+// --------------------------------------------
+// Trigger model (PUSH-based, not GitOps):
+//   1. Auto: the CI Jenkinsfile triggers this job at the end of a
+//      successful build, passing GIT_SHA as a parameter.
+//   2. Manual: an operator can run this job and either leave
+//      GIT_SHA blank (deploys the latest successful build from S3)
+//      or pin a specific SHA for rollback.
+//
+// What happens here:
+//   - Resolve the target image tag (param > S3 pointer > fail)
+//   - Verify the image exists in ECR (refuse to deploy phantom tags)
+//   - Render deployment.yaml by substituting IMAGE_TAG_PLACEHOLDER
+//   - kubectl apply
+//   - Wait for rollout, dump diagnostics on failure (events + pod logs)
+//   - Tag the S3 manifest with the deployed-to-development marker
+//
+// What this does NOT do:
+//   - It does NOT build, scan, or push images. That's the CI job's
+//     responsibility. Promotion is "pick a SHA, apply manifest".
+//   - It does NOT auto-rollback on failure. We dump diagnostics and
+//     leave the cluster in its last-known state (Deployment will
+//     hold the previous ReplicaSet because rolling update with
+//     maxUnavailable=0).
+// ============================================
+
+pipeline {
+    agent {
+        kubernetes {
+            yaml shopeaseDeployer(serviceName: 'auth-service')
+            defaultContainer 'jnlp'
+            showRawYaml false
+        }
+    }
+
+    parameters {
+        string(
+            name: 'GIT_SHA',
+            defaultValue: '',
+            description: 'Optional. 7-char git SHA to deploy. Leave blank to deploy the latest successful CI build from S3 (development pointer). Set to roll forward/back.'
+        )
+        booleanParam(
+            name: 'DRY_RUN',
+            defaultValue: false,
+            description: 'If checked, render the deployment manifest and run kubectl diff, but skip the actual apply + rollout.'
+        )
+    }
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        timestamps()
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '10', daysToKeepStr: '30'))
+    }
+
+    environment {        SERVICE_NAME    = 'auth-service'
+        AWS_REGION      = 'ap-south-1'
+        EKS_CLUSTER     = 'shopease-webapp-dev'
+        APP_NAMESPACE   = 'shopease-webapp-development'
+        DEPLOYMENT_NAME = 'auth-service-deployment'
+        ARTIFACT_BUCKET = 'shopease-webapp-development-ci-artifacts'
+        // Branch used to resolve the "latest" pointer when GIT_SHA is blank.
+        // For development this is `development`; we'll generalize per-env later.
+        TARGET_BRANCH   = 'development'
+
+        // Path to the rendered deployment manifest inside the workspace.
+        // (deployment.yaml lives in the same repo as the Jenkinsfile.)
+        DEPLOY_MANIFEST = 'deployment-kubernetes/auth-service/deployment.yaml'
+    }
+
+    stages {
+
+        stage('Setup & Resolve Tag') {
+            steps {
+                container('aws') {
+                    script {
+                        logger.stageHeader('Setup & Resolve Tag')
+
+                        env.AWS_ACCOUNT_ID = sh(
+                            script: 'aws sts get-caller-identity --query Account --output text',
+                            returnStdout: true
+                        ).trim()
+
+                        env.ECR_REPO_NAME = "shopease-webapp-development-${SERVICE_NAME}"
+                        env.ECR_REPO      = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO_NAME}"
+
+                        // ---- Tag resolution -------------------------------
+                        // Priority:
+                        //   1. Explicit param (operator typed a SHA)
+                        //   2. Upstream CI parameter (auto-trigger)
+                        //   3. S3 latest pointer for the target branch
+                        // We fail closed if none of these yield a value.
+                        String resolvedSha = (params.GIT_SHA ?: '').trim()
+
+                        if (!resolvedSha) {
+                            logger.logInfo("No GIT_SHA param given - reading latest pointer from S3...")
+                            String pointer = sh(
+                                script: """aws s3 cp s3://${ARTIFACT_BUCKET}/${SERVICE_NAME}/latest/${TARGET_BRANCH}.json - """,
+                                returnStdout: true
+                            ).trim()
+                            // Tiny jq-free parse: pointer JSON is small and stable.
+                            // Falls back to a grep if jq isn't on this image.
+                            resolvedSha = sh(
+                                script: "echo '${pointer}' | grep -oE '\"gitSha\"\\s*:\\s*\"[^\"]+\"' | head -1 | sed 's/.*\"\\([^\"]*\\)\"\$/\\1/'",
+                                returnStdout: true
+                            ).trim()
+                        }
+
+                        if (!resolvedSha) {
+                            error("Could not resolve a git SHA to deploy. Provide GIT_SHA param or run CI first.")
+                        }
+
+                        env.GIT_SHA   = resolvedSha
+                        env.IMAGE_TAG = resolvedSha
+                        env.IMAGE_URI = "${env.ECR_REPO}:${env.IMAGE_TAG}"
+
+                        logger.logInfo("Service     : ${env.SERVICE_NAME}")
+                        logger.logInfo("AWS Account : ${env.AWS_ACCOUNT_ID}")
+                        logger.logInfo("Cluster     : ${env.EKS_CLUSTER}")
+                        logger.logInfo("Namespace   : ${env.APP_NAMESPACE}")
+                        logger.logInfo("Resolved SHA: ${env.GIT_SHA}")
+                        logger.logInfo("Image URI   : ${env.IMAGE_URI}")
+                        logger.logInfo("Dry run     : ${params.DRY_RUN}")
+
+                        sh '''
+                            echo "-- IRSA caller identity (should be ci-agent-irsa) --"
+                            aws sts get-caller-identity --output table
+                        '''
+                        logger.logSuccess('Setup completed')
+                    }
+                }
+            }
+        }
+
+        stage('Verify Image in ECR') {
+            // Refuse to deploy a tag that doesn't exist. Cheap guard against
+            // typos in the GIT_SHA param, S3-pointer races, or an ECR
+            // lifecycle policy that already expired the image.
+            steps {
+                container('aws') {
+                    script { logger.stageHeader('Verify Image in ECR') }
+                    sh '''
+                        set -e
+                        echo "-- Looking up image ${IMAGE_TAG} in ${ECR_REPO_NAME}"
+                        aws ecr describe-images \
+                            --repository-name "${ECR_REPO_NAME}" \
+                            --image-ids "imageTag=${IMAGE_TAG}" \
+                            --region "${AWS_REGION}" \
+                            --query 'imageDetails[0].{digest:imageDigest,pushedAt:imagePushedAt,sizeMB:`imageSizeInBytes`}' \
+                            --output table
+                    '''
+                }
+            }
+        }
+
+        stage('Configure kubectl') {
+            steps {
+                container('aws') {
+                    script { logger.stageHeader('Configure kubectl (aws eks update-kubeconfig)') }
+                    sh '''
+                        set -e
+                        aws eks update-kubeconfig \
+                            --name "${EKS_CLUSTER}" \
+                            --region "${AWS_REGION}" \
+                            --kubeconfig /root/.kube/config
+                        chmod 0644 /root/.kube/config
+                        echo "Kubeconfig written to /root/.kube/config"
+                    '''
+                }
+                container('kubectl') {
+                    sh '''
+                        set -e
+                        echo "-- Cluster reachability check ---------------"
+                        kubectl --kubeconfig /root/.kube/config version --output=yaml | head -20
+                        echo ""
+                        echo "-- whoami (server-side) ---------------------"
+                        kubectl --kubeconfig /root/.kube/config auth whoami || true
+                        echo ""
+                        echo "-- Effective permissions in ${APP_NAMESPACE} --"
+                        for verb in get list patch update; do
+                            for res in deployments pods events; do
+                                printf "  %-7s %-12s  " "${verb}" "${res}"
+                                kubectl --kubeconfig /root/.kube/config auth can-i "${verb}" "${res}" -n "${APP_NAMESPACE}" || true
+                            done
+                        done
+                    '''
+                }
+            }
+        }
+
+        stage('Render Manifest') {
+            steps {
+                container('kubectl') {
+                    script { logger.stageHeader('Render Manifest (substitute image tag)') }
+                    sh '''
+                        set -e
+                        if [ ! -f "${DEPLOY_MANIFEST}" ]; then
+                            echo "ERROR: ${DEPLOY_MANIFEST} not found in workspace."
+                            exit 1
+                        fi
+
+                        # In-place substitution into a COPY (never mutate the
+                        # checked-in file). The placeholder is unique enough
+                        # that a stray collision is essentially impossible.
+                        RENDERED="${WORKSPACE}/.rendered-deployment.yaml"
+                        cp "${DEPLOY_MANIFEST}" "${RENDERED}"
+                        sed -i "s|IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g" "${RENDERED}"
+
+                        echo "-- Diff vs. checked-in manifest -------------"
+                        diff -u "${DEPLOY_MANIFEST}" "${RENDERED}" || true
+
+                        echo ""
+                        echo "-- Rendered image line ----------------------"
+                        grep -n "image:" "${RENDERED}"
+
+                        # Sanity: the placeholder MUST be gone after sed.
+                        if grep -q "IMAGE_TAG_PLACEHOLDER" "${RENDERED}"; then
+                            echo "ERROR: placeholder still present after sed - manifest broken."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                container('kubectl') {
+                    script { logger.stageHeader('Deploy (kubectl apply)') }
+                    sh '''
+                        set -e
+                        RENDERED="${WORKSPACE}/.rendered-deployment.yaml"
+
+                        if [ "${DRY_RUN}" = "true" ]; then
+                            echo "-- DRY RUN: server-side diff only -----------"
+                            kubectl --kubeconfig /root/.kube/config diff -f "${RENDERED}" || true
+                            echo "Skipping apply because DRY_RUN=true."
+                            exit 0
+                        fi
+
+                        echo "-- kubectl apply ----------------------------"
+                        kubectl --kubeconfig /root/.kube/config apply -f "${RENDERED}"
+
+                        echo ""
+                        echo "-- Current deployment image -----------------"
+                        kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            get deployment "${DEPLOYMENT_NAME}" \
+                            -o jsonpath='{.spec.template.spec.containers[0].image}'
+                        echo ""
+                    '''
+                }
+            }
+        }
+
+        stage('Wait for Rollout') {
+            when { expression { return !params.DRY_RUN } }
+            steps {
+                container('kubectl') {
+                    script { logger.stageHeader('Wait for Rollout') }
+                    // 10-minute ceiling. With maxUnavailable=0 and 2 replicas,
+                    // a healthy rollout finishes in ~30-60s. Anything longer
+                    // is almost always ImagePullBackOff or a failing probe -
+                    // diagnostics in the post-failure block below will show it.
+                    sh '''
+                        set -e
+                        kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            rollout status deployment/"${DEPLOYMENT_NAME}" \
+                            --timeout=10m
+                    '''
+                }
+            }
+            post {
+                failure {
+                    container('kubectl') {
+                        script { logger.logError('Rollout failed - dumping diagnostics') }
+                        sh '''
+                            set +e
+                            echo "============ Deployment describe ============"
+                            kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                describe deployment "${DEPLOYMENT_NAME}"
+
+                            echo ""
+                            echo "============ ReplicaSets ===================="
+                            kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                get rs -l app="${DEPLOYMENT_NAME}" \
+                                -o wide
+
+                            echo ""
+                            echo "============ Pods (wide) ===================="
+                            kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                get pods -l app="${DEPLOYMENT_NAME}" -o wide
+
+                            echo ""
+                            echo "============ Recent events =================="
+                            kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                get events \
+                                --sort-by=.lastTimestamp \
+                                --field-selector involvedObject.kind=Pod \
+                                | tail -40
+
+                            echo ""
+                            echo "============ Per-pod logs (last 50 lines) ==="
+                            for pod in $(kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                            get pods -l app="${DEPLOYMENT_NAME}" \
+                                            -o jsonpath='{.items[*].metadata.name}'); do
+                                echo "----- ${pod} -----"
+                                kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                                    logs "${pod}" --all-containers=true --tail=50 2>&1 || true
+                                echo ""
+                            done
+                            exit 0
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Post-deploy Verification') {
+            when { expression { return !params.DRY_RUN } }
+            steps {
+                container('kubectl') {
+                    script { logger.stageHeader('Post-deploy Verification') }
+                    sh '''
+                        set -e
+                        echo "-- Deployment status ------------------------"
+                        kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            get deployment "${DEPLOYMENT_NAME}" -o wide
+
+                        echo ""
+                        echo "-- Ready replicas vs desired ----------------"
+                        DESIRED=$(kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            get deployment "${DEPLOYMENT_NAME}" -o jsonpath='{.spec.replicas}')
+                        READY=$(kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            get deployment "${DEPLOYMENT_NAME}" -o jsonpath='{.status.readyReplicas}')
+                        echo "desired=${DESIRED}  ready=${READY:-0}"
+                        if [ "${READY:-0}" != "${DESIRED}" ]; then
+                            echo "ERROR: not all replicas Ready after rollout."
+                            exit 1
+                        fi
+
+                        echo ""
+                        echo "-- Confirm running image tag ----------------"
+                        RUNNING_IMAGE=$(kubectl --kubeconfig /root/.kube/config -n "${APP_NAMESPACE}" \
+                            get deployment "${DEPLOYMENT_NAME}" \
+                            -o jsonpath='{.spec.template.spec.containers[0].image}')
+                        echo "Running image: ${RUNNING_IMAGE}"
+                        echo "Expected tag : ${IMAGE_TAG}"
+                        case "${RUNNING_IMAGE}" in
+                            *":${IMAGE_TAG}") echo "OK: image tag matches." ;;
+                            *) echo "ERROR: image tag mismatch."; exit 1 ;;
+                        esac
+                    '''
+                }
+            }
+        }
+
+        stage('Tag S3 Manifest as Deployed') {
+            when { expression { return !params.DRY_RUN } }
+            steps {
+                container('aws') {
+                    script { logger.stageHeader('Tag S3 Manifest as Deployed') }
+                    // Why: gives us a queryable audit trail ("what was deployed
+                    // to dev on day X, and which CI build produced it") without
+                    // standing up a separate deployments-db. The "latest
+                    // deployed" pointer is what the next CD run reads when
+                    // GIT_SHA is blank.
+                    sh '''
+                        set +e
+                        DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                        cat > "${WORKSPACE}/deployed.json" <<EOF
+{
+  "service": "${SERVICE_NAME}",
+  "environment": "${TARGET_BRANCH}",
+  "gitSha": "${GIT_SHA}",
+  "imageUri": "${IMAGE_URI}",
+  "cluster": "${EKS_CLUSTER}",
+  "namespace": "${APP_NAMESPACE}",
+  "deploymentName": "${DEPLOYMENT_NAME}",
+  "deployedAt": "${DEPLOYED_AT}",
+  "deployJobUrl": "${BUILD_URL}",
+  "deployBuildNumber": "${BUILD_NUMBER}"
+}
+EOF
+                        aws s3 cp "${WORKSPACE}/deployed.json" \
+                            "s3://${ARTIFACT_BUCKET}/${SERVICE_NAME}/deployed/${TARGET_BRANCH}.json" \
+                            --content-type application/json \
+                            --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},env=${TARGET_BRANCH}"
+                        exit 0
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'deployed.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+            }
+        }
+
+        stage('Deploy Summary') {
+            steps {
+                script {
+                    echo """
+============================================================
+ DEPLOY SUMMARY
+============================================================
+ Service       : ${env.SERVICE_NAME}
+ Environment   : ${env.TARGET_BRANCH}
+ Cluster       : ${env.EKS_CLUSTER}
+ Namespace     : ${env.APP_NAMESPACE}
+ Deployment    : ${env.DEPLOYMENT_NAME}
+ Git SHA       : ${env.GIT_SHA}
+ Image URI     : ${env.IMAGE_URI}
+ Dry run       : ${params.DRY_RUN}
+ Build #       : ${env.BUILD_NUMBER}
+ Result        : ${currentBuild.currentResult}
+============================================================
+"""
+                }
+            }
+        }
+    }
+}

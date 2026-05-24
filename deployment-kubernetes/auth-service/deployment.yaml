@@ -54,8 +54,7 @@ spec:
             - pod-template-hash
           nodeAffinityPolicy: Honor
           nodeTaintsPolicy: Honor
-
-        - maxSkew: 1
+          - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
@@ -68,7 +67,13 @@ spec:
 
       containers:
         - name: auth-service-workload
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-auth-service:1.1.0
+          # Image tag is rewritten by the CD pipeline (Jenkinsfile.cd)
+          # via `sed -i "s|IMAGE_TAG_PLACEHOLDER|${GIT_SHA}|g"` right
+          # before `kubectl apply`. The placeholder must stay literal
+          # in git so the deployment.yaml is always valid YAML and
+          # diff-friendly. The repo+region prefix is hard-coded because
+          # it never changes across environments for this service.
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-auth-service:IMAGE_TAG_PLACEHOLDER
           imagePullPolicy: IfNotPresent
 
           ports:

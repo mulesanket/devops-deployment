@@ -14,6 +14,22 @@ resource "aws_eks_cluster" "eks_control_plane" {
     endpoint_private_access = false
     public_access_cidrs     = var.cluster_api_cidrs
   }
+  # Enable EKS Access Entries (in addition to the legacy aws-auth ConfigMap)
+  # so we can declaratively map IAM roles (e.g. the Jenkins CI/CD IRSA role)
+  # to Kubernetes groups from Terraform. Without this, the cluster defaults to
+  # CONFIG_MAP-only and `aws_eks_access_entry` resources cannot be created.
+  # API_AND_CONFIG_MAP is the safe migration mode: existing aws-auth entries
+  # keep working, new entries can be added via the EKS API.
+  #
+  # CRITICAL: `bootstrap_cluster_creator_admin_permissions` is set ONCE at
+  # cluster creation and CANNOT change without REPLACING the cluster (which
+  # rotates the OIDC issuer URL and breaks every IRSA binding in the account).
+  # The existing cluster was created with it = true (the EKS default), so we
+  # MUST mirror that here. Treat this value as immutable.
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
 
   tags = {
     Name = "${var.eks_cluster_name}-cluster"

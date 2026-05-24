@@ -133,12 +133,24 @@ data "aws_iam_policy_document" "ci_agent" {
     ]
     resources = ["${aws_s3_bucket.ci_artifacts.arn}/*"]
   }
-
   statement {
     sid       = "S3ArtifactsList"
     effect    = "Allow"
     actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
     resources = [aws_s3_bucket.ci_artifacts.arn]
+  }
+
+  # CD pipeline only: the deployer pod needs `eks:DescribeCluster` so that
+  # `aws eks update-kubeconfig` can fetch the cluster endpoint + CA data and
+  # write a kubeconfig. The Kubernetes-level deploy perms (patch deployments,
+  # read rollout status) come from the EKS Access Entry below, NOT from IAM.
+  statement {
+    sid     = "EksDescribeForKubeconfig"
+    effect  = "Allow"
+    actions = ["eks:DescribeCluster"]
+    resources = [
+      "arn:aws:eks:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${module.eks.eks_cluster_name}"
+    ]
   }
 }
 
@@ -170,7 +182,39 @@ module "ci_agent_irsa" {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Outputs (for SA annotation + Jenkinsfile)
+# 4. EKS Access Entry: map the CI/CD IRSA role to a K8s group
+# ---------------------------------------------------------------------------
+# Why this exists:
+#   The IAM policy above grants AWS-level perms (ECR push, S3 put,
+#   eks:DescribeCluster). To actually CALL the Kubernetes API
+#   (kubectl get/patch deployment), the role must also be known to the
+#   cluster's authentication layer.
+#
+# Modern EKS supports two mechanisms:
+#   1. aws-auth ConfigMap   (legacy, edit-prone, no IaC affinity)
+#   2. EKS Access Entries   (API-driven, declarative in Terraform)
+#
+# We use #2. The role gets mapped to the K8s group `shopease-deployers`,
+# which is then granted least-privilege Role/RoleBinding in the
+# `shopease-webapp-development` namespace (see
+# deployment-kubernetes/base/ci-cd-jenkins-deployer-rbac.yaml).
+#
+# Note: NO `access_policy_association` is attached - that would grant
+# AWS-managed cluster-wide policies (e.g. AmazonEKSClusterAdminPolicy).
+# We deliberately keep the role unprivileged at the cluster level and
+# let our namespaced RBAC do the gating.
+# ---------------------------------------------------------------------------
+resource "aws_eks_access_entry" "ci_agent" {
+  cluster_name      = module.eks.eks_cluster_name
+  principal_arn     = module.ci_agent_irsa.role_arn
+  kubernetes_groups = ["shopease-deployers"]
+  type              = "STANDARD"
+
+  depends_on = [module.eks, module.ci_agent_irsa]
+}
+
+# ---------------------------------------------------------------------------
+# 5. Outputs (for SA annotation + Jenkinsfile)
 # ---------------------------------------------------------------------------
 output "ci_agent_irsa_role_arn" {
   description = "IAM role ARN to annotate on the jenkins-agent-builder ServiceAccount."
@@ -180,4 +224,9 @@ output "ci_agent_irsa_role_arn" {
 output "ci_artifacts_bucket_name" {
   description = "S3 bucket for CI build artifacts (jars, SBOMs, scan reports)."
   value       = aws_s3_bucket.ci_artifacts.bucket
+}
+
+output "ci_eks_cluster_name" {
+  description = "EKS cluster name the CD pipeline targets (used by `aws eks update-kubeconfig`)."
+  value       = module.eks.eks_cluster_name
 }

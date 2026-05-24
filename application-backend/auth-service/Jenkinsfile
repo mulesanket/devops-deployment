@@ -15,8 +15,8 @@ pipeline {
         disableConcurrentBuilds()
         ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '5', daysToKeepStr: '30'))
-    }        
-    
+    }
+
     environment {
         SERVICE_NAME    = 'auth-service'
         AWS_REGION      = 'ap-south-1'
@@ -64,7 +64,7 @@ pipeline {
                         sh '''
                             echo "-- IRSA caller identity (should be ci-agent-irsa) --"
                             aws sts get-caller-identity --output table
-                        '''                        
+                        '''
                         logger.logSuccess('Setup & Environment completed')
                     }
                 }
@@ -350,7 +350,7 @@ pipeline {
                                      allowEmptyArchive: true,
                                      fingerprint: true
                     sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
-                }                
+                }
                 success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
                 failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
             }
@@ -375,7 +375,7 @@ pipeline {
                         fi
                         exit 0
                     '''
-                }                
+                }
                 container('tools') {
                     sh '''
                         set +e
@@ -479,7 +479,7 @@ pipeline {
                         echo "-- Uploading scan reports --------------------"
                         upload_report "${WORKSPACE}/trivy-secrets-report.json" "secrets"      "secrets"
                         upload_report "${WORKSPACE}/trivy-fs-report.json"      "dependencies" "deps"
-                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"                        
+                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"
                         # ----------------------------------------------------
                         # 3. JUnit / surefire reports
                         #    Uploaded as a flat directory of XMLs (the aws-cli
@@ -602,9 +602,7 @@ EOF
                     '''
                 }
             }
-        }
-
-        stage('Build Summary') {
+        }        stage('Build Summary') {
             steps {
                 script {
                     echo """
@@ -621,6 +619,41 @@ EOF
  Result      : ${currentBuild.currentResult}
 ============================================================
 """
+                }
+            }
+        }
+
+        stage('Trigger CD') {
+            // Only auto-promote builds on the integration branch.
+            // Feature branches still produce ECR images + S3 artifacts,
+            // but they don't auto-deploy to the shared dev cluster -
+            // an operator can still trigger the CD job manually with a SHA.
+            when {
+                anyOf {
+                    branch 'development'
+                    branch 'main'
+                }
+            }
+            steps {
+                script {
+                    logger.stageHeader('Trigger CD pipeline')
+                    // `wait: false`  -> CI returns SUCCESS immediately; CD
+                    //                  runs as an independent build.
+                    // `propagate: false` -> a CD failure won't fail this CI
+                    //                  job (CI's contract is "image is built
+                    //                  and scanned", not "deployed").
+                    // The downstream job MUST exist in Jenkins as a
+                    // separate pipeline (e.g. `auth-service-cd`) pointing
+                    // at this repo's `Jenkinsfile.cd`.
+                    def cdJob = env.CD_JOB_NAME ?: 'auth-service-cd'
+                    logger.logInfo("Triggering downstream job: ${cdJob} with GIT_SHA=${env.GIT_SHA}")
+                    build job: cdJob,
+                          parameters: [
+                              string(name: 'GIT_SHA',  value: env.GIT_SHA),
+                              booleanParam(name: 'DRY_RUN', value: false)
+                          ],
+                          wait: false,
+                          propagate: false
                 }
             }
         }

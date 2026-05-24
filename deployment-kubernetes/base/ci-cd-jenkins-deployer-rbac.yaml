@@ -1,0 +1,92 @@
+# ============================================
+# Shopease: RBAC for the Jenkins CD pipeline
+# Author: Sanket Mule
+# --------------------------------------------
+# Purpose:
+#   Grants the Jenkins build-agent IRSA role
+#   (mapped via EKS Access Entry to the K8s
+#   group `shopease-deployers`) the minimum
+#   permissions needed to perform a rolling
+#   deployment of a service in the
+#   `shopease-webapp-development` namespace.
+#
+# Scope: namespace-only (NOT cluster-wide).
+#
+# Why a SEPARATE Role/Binding (not reusing
+# `jenkins-agent-manager`):
+#   - `jenkins-agent-manager` lives in the CI
+#     namespace (`jenkins-cicd-agents`) and is
+#     intended for the Jenkins CONTROLLER to
+#     spawn agent pods.
+#   - This Role lives in the APP namespace and
+#     is intended for the AGENT POD (during a
+#     CD run) to patch Deployments + check
+#     rollout status.
+#   - Keeping them separate makes the blast
+#     radius of either binding clear and lets
+#     us promote CD perms to staging/prod
+#     without dragging CI perms along.
+# ============================================
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: shopease-deployer
+  namespace: shopease-webapp-development
+  labels:
+    app.kubernetes.io/part-of: jenkins-cd
+rules:
+  # Read + patch Deployments (the actual CD action: `kubectl set image`
+  # or `kubectl apply` of a deployment.yaml with a substituted tag).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status", "deployments/scale"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+
+  # ReplicaSets / Pods are needed for `kubectl rollout status`
+  # to walk the deployment -> rs -> pod chain, and for diagnostics
+  # when a rollout stalls (CrashLoopBackOff, ImagePullBackOff, etc.).
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/status"]
+    verbs: ["get", "list", "watch"]
+
+  # Events: surface scheduling / image-pull errors in pipeline logs
+  # without needing extra cluster-level perms.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+  # ConfigMaps + Services: read-only sanity checks (verify the
+  # deployment points at the right config/secret refs after the
+  # apply). NO write perms - secrets are explicitly excluded.
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch"]
+
+  # NO permission on:
+  #   - secrets      (CD pipeline must never touch app secrets)
+  #   - serviceaccounts / roles / rolebindings (no privilege escalation)
+  #   - namespaces   (CD cannot create/delete namespaces)
+  #   - networkpolicies / ingresses (platform team owns those)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: shopease-deployer-binding
+  namespace: shopease-webapp-development
+  labels:
+    app.kubernetes.io/part-of: jenkins-cd
+subjects:
+  # This group name MUST match the `kubernetes_groups` on the
+  # `aws_eks_access_entry` Terraform resource for the IRSA role
+  # `shopease-webapp-development-ci-agent-irsa` (see ci-cd.tf).
+  - kind: Group
+    name: shopease-deployers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: shopease-deployer
+  apiGroup: rbac.authorization.k8s.io
