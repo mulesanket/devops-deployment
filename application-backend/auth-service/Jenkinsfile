@@ -24,6 +24,12 @@ pipeline {
         SAFE_BRANCH     = "${env.BRANCH_NAME ?: env.GIT_BRANCH?.replaceAll('^origin/', '') ?: 'development'}"
         ARTIFACT_BUCKET = 'shopease-webapp-development-ci-artifacts'
 
+        // S3 tarball cache locations (industry pattern: GitHub Actions cache,
+        // GitLab CI cache, AWS CodeBuild S3 cache all do the same).
+        // Why S3 over EBS PVC: multi-AZ for free, no AZ pinning, no RWO
+        // contention with parallel builds, no orphan-volume cleanup.
+        // Maven cache is per-service (avoid cross-service dep pollution).
+        // Trivy DB cache is shared (CVE data is service-agnostic).
         CACHE_S3_M2    = "s3://shopease-webapp-development-ci-artifacts/_caches/${SERVICE_NAME}/m2.tar.gz"
         CACHE_S3_TRIVY = "s3://shopease-webapp-development-ci-artifacts/_caches/_shared/trivy-db.tar.gz"
     }
@@ -58,8 +64,7 @@ pipeline {
                         sh '''
                             echo "-- IRSA caller identity (should be ci-agent-irsa) --"
                             aws sts get-caller-identity --output table
-                        '''
-
+                        '''                        
                         logger.logSuccess('Setup & Environment completed')
                     }
                 }
@@ -71,6 +76,10 @@ pipeline {
                 container('aws') {
                     script { logger.stageHeader('Restore Caches from S3') }
 
+                    // Stream tarballs from S3 into workspace. The actual extraction
+                    // happens in containers that have `tar` (maven, tools) - the
+                    // aws-cli container has no tar binary. We extract via shared
+                    // workspace volume in the next steps.
                     sh '''
                         set +e
                         mkdir -p "${WORKSPACE}/.cache"
@@ -118,6 +127,7 @@ pipeline {
                         if [ -f "${WORKSPACE}/.cache/trivy-db.tar.gz" ]; then
                             mkdir -p /root/.cache/trivy
                             echo "-- Extracting Trivy DB cache into /root/.cache/trivy --"
+                            # Trivy image has `tar` baked in
                             tar -xzf "${WORKSPACE}/.cache/trivy-db.tar.gz" -C /root/.cache/trivy
                             echo "Trivy cache restored. Contents:"
                             du -sh /root/.cache/trivy 2>/dev/null || true
@@ -159,6 +169,15 @@ pipeline {
                     '''
                 }
             }
+            post {
+                always {
+                    script { logger.logWarning('Archiving trivy secret report if available') }
+                    archiveArtifacts artifacts: 'trivy-secrets-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+                failure { script { logger.logError('Secret scan failed: secrets detected. Inspect the archived report.') } }
+            }
         }
 
         stage('Dependency Vulnerability Scan') {
@@ -169,13 +188,43 @@ pipeline {
                     sh '''
                         set -e
                         echo "-- Running trivy fs (vuln) --------------------"
+                        trivy --version
+                        trivy fs \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --exit-code 0 \
+                            --no-progress \
+                            --format json \
+                            --output "${WORKSPACE}/trivy-fs-report.json" \
+                            "application-backend/${SERVICE_NAME}"
+
+                        echo ""
+                        echo "-- Findings (HIGH / CRITICAL only) ------------"
+                        trivy convert \
+                            --format table \
+                            --severity HIGH,CRITICAL \
+                            "${WORKSPACE}/trivy-fs-report.json"
+
+                        echo ""
+                        echo "-- Gate (fail on any HIGH/CRITICAL) -----------"
                         trivy fs \
                             --scanners vuln \
                             --severity HIGH,CRITICAL \
                             --exit-code 1 \
                             --no-progress \
+                            --quiet \
                             "application-backend/${SERVICE_NAME}"
+
+                        echo "\\033[1;32mSUCCESS: No HIGH/CRITICAL vulnerabilities in dependencies.\\033[0m"
                     '''
+                }
+            }
+            post {
+                always {
+                    script { logger.logWarning('Archiving trivy fs report if available') }
+                    archiveArtifacts artifacts: 'trivy-fs-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
                 }
             }
         }
@@ -183,11 +232,36 @@ pipeline {
         stage('Build & Unit Tests') {
             steps {
                 container('maven') {
+                    script {
+                        logger.stageHeader('Build & Unit Tests')
+                        logger.logInfo('Running mvn verify inside maven container')
+                    }
+
                     sh '''
                         set -e
+                        echo "-- Toolchain ----------------------------------"
+                        mvn -v
+
+                        echo ""
+                        echo "-- Running mvn verify -------------------------"
                         cd application-backend
                         mvn -pl ${SERVICE_NAME} -am -B -ntp verify
+
+                        echo ""
+                        echo "-- Test report locations ----------------------"
+                        find . -type d -name surefire-reports | head -20
+                        find . -type f -name jacoco.xml      | head -20
+
+                        echo "\\033[1;32mSUCCESS: Build and unit tests completed.\\033[0m"
                     '''
+                }
+            }
+            post {
+                always {
+                    script { logger.logWarning('Publishing JUnit results and coverage reports') }
+                    junit testResults: 'application-backend/**/target/surefire-reports/*.xml',
+                          allowEmptyResults: false,
+                          skipPublishingChecks: true
                 }
             }
         }
@@ -195,27 +269,316 @@ pipeline {
         stage('Image Build & Push') {
             steps {
                 container('kaniko') {
+                    script {
+                        logger.stageHeader('Image Build & Push (Kaniko)')
+                        logger.logInfo("Building & pushing : ${env.IMAGE_URI}")
+                    }
+
                     sh '''
                         set -e
                         /kaniko/executor \
                             --context "${WORKSPACE}/application-backend" \
                             --dockerfile "${SERVICE_NAME}/Dockerfile" \
-                            --destination "${IMAGE_URI}"
+                            --destination "${IMAGE_URI}" \
+                            --label "git.sha=${GIT_SHA}" \
+                            --label "git.branch=${SAFE_BRANCH}" \
+                            --label "build.number=${BUILD_NUMBER}" \
+                            --label "service=${SERVICE_NAME}" \
+                            --snapshot-mode=redo \
+                            --use-new-run \
+                            --log-format=text \
+                            --verbosity=info
                     '''
                 }
             }
         }
 
-        stage('Verify ECR Push') {
+        stage('Image Vulnerability Scan') {
             steps {
-                container('aws') {
+                container('tools') {
+                    script { logger.stageHeader('Image Vulnerability Scan - Trivy image (ECR)') }
+
+                    retry(2) {
+                        sh '''
+                            set -e
+                            echo "-- Running trivy image ------------------------"
+                            trivy --version
+
+                            export TMPDIR="${WORKSPACE}/.trivy-tmp"
+                            mkdir -p "${TMPDIR}"
+
+                            trivy image \
+                                --scanners vuln \
+                                --severity HIGH,CRITICAL \
+                                --ignore-unfixed \
+                                --exit-code 0 \
+                                --no-progress \
+                                --format json \
+                                --output "${WORKSPACE}/trivy-image-report.json" \
+                                "${IMAGE_URI}"
+                        '''
+                    }
+
                     sh '''
-                        aws ecr describe-images \
-                            --repository-name "${ECR_REPO_NAME}" \
-                            --image-ids "imageTag=${GIT_SHA}" \
-                            --region "${AWS_REGION}"
+                        set -e
+                        echo ""
+                        echo "-- Findings (HIGH / CRITICAL, fixed-only) -----"
+                        trivy convert \
+                            --format table \
+                            --severity HIGH,CRITICAL \
+                            "${WORKSPACE}/trivy-image-report.json"
+
+                        echo ""
+                        echo "-- Gate (fail on fixable HIGH/CRITICAL) -------"
+                        trivy image \
+                            --scanners vuln \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --exit-code 1 \
+                            --no-progress \
+                            --quiet \
+                            "${IMAGE_URI}"
+
+                        echo "\\033[1;32mSUCCESS: No fixable HIGH/CRITICAL vulnerabilities in image.\\033[0m"
                     '''
                 }
+            }
+            post {
+                always {
+                    script { logger.logWarning('Archiving trivy image report if available') }
+                    archiveArtifacts artifacts: 'trivy-image-report.json',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                    sh 'rm -rf "${WORKSPACE}/.trivy-tmp" || true'
+                }                
+                success { script { logger.logSuccess('Image Vulnerability Scan stage completed') } }
+                failure { script { logger.logError('Image Vulnerability Scan failed: fixable CVEs found or trivy errored.') } }
+            }
+        }
+
+        stage('Save Caches') {
+            // Repack and upload caches back to S3 so the NEXT build is warm.
+            // We do this only after all gates pass to avoid poisoning the
+            // cache with broken-build state.
+            steps {
+                container('maven') {
+                    script { logger.stageHeader('Save Caches to S3') }
+                    sh '''
+                        set +e
+                        if [ -d /root/.m2/repository ]; then
+                            echo "-- Packing Maven cache ----------------------"
+                            du -sh /root/.m2/repository
+                            tar -czf "${WORKSPACE}/.cache/m2.tar.gz" -C /root/.m2 repository
+                            ls -lh "${WORKSPACE}/.cache/m2.tar.gz"
+                        else
+                            echo "WARN: /root/.m2/repository missing - skipping Maven cache save"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                container('tools') {
+                    sh '''
+                        set +e
+                        if [ -d /root/.cache/trivy ]; then
+                            echo "-- Packing Trivy DB cache -------------------"
+                            du -sh /root/.cache/trivy
+                            tar -czf "${WORKSPACE}/.cache/trivy-db.tar.gz" -C /root/.cache/trivy .
+                            ls -lh "${WORKSPACE}/.cache/trivy-db.tar.gz"
+                        else
+                            echo "WARN: /root/.cache/trivy missing - skipping Trivy cache save"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                container('aws') {
+                    sh '''
+                        set +e
+                        if [ -f "${WORKSPACE}/.cache/m2.tar.gz" ]; then
+                            echo "-- Uploading Maven cache to S3 --------------"
+                            aws s3 cp "${WORKSPACE}/.cache/m2.tar.gz" "${CACHE_S3_M2}" \
+                                --no-progress \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},type=m2-cache"
+                        fi
+
+                        if [ -f "${WORKSPACE}/.cache/trivy-db.tar.gz" ]; then
+                            echo "-- Uploading Trivy cache to S3 --------------"
+                            aws s3 cp "${WORKSPACE}/.cache/trivy-db.tar.gz" "${CACHE_S3_TRIVY}" \
+                                --no-progress \
+                                --metadata "git-sha=${GIT_SHA},build=${BUILD_NUMBER},type=trivy-db-cache"
+                        fi
+                        exit 0
+                    '''
+                }
+
+                script { logger.logSuccess('Save Caches completed') }
+            }
+        }
+
+        stage('Publish Artifacts to S3') {
+            steps {
+                container('aws') {
+                    script {
+                        logger.stageHeader('Publish Artifacts to S3')
+                        logger.logInfo("Bucket   : s3://${env.ARTIFACT_BUCKET}")
+                        logger.logInfo("Prefix   : ${env.SERVICE_NAME}/")
+                        logger.logInfo("Pattern  : ${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER}-<type>.<ext>")
+                    }
+
+                    sh '''
+                        set -e
+
+                        BASE="s3://${ARTIFACT_BUCKET}/${SERVICE_NAME}"
+                        PREFIX="${SERVICE_NAME}-${GIT_SHA}-${BUILD_NUMBER}"
+
+                        # ----------------------------------------------------
+                        # 1. JAR artifact (from maven build output)
+                        # ----------------------------------------------------
+                        echo "-- Locating JAR ------------------------------"
+                        JAR_FILE=$(find application-backend/${SERVICE_NAME}/target \
+                            -maxdepth 1 -type f -name "*.jar" \
+                            ! -name "*-sources.jar" ! -name "*-javadoc.jar" \
+                            | head -1 || true)
+
+                        if [ -n "${JAR_FILE}" ] && [ -f "${JAR_FILE}" ]; then
+                            DEST="${BASE}/jars/${PREFIX}.jar"
+                            echo "Uploading ${JAR_FILE} -> ${DEST}"
+                            aws s3 cp "${JAR_FILE}" "${DEST}" \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},branch=${SAFE_BRANCH}"
+                        else
+                            echo "WARN: no JAR found under target/ - skipping"
+                        fi
+
+                        # ----------------------------------------------------
+                        # 2. Trivy reports
+                        # ----------------------------------------------------
+                        upload_report() {
+                            SRC="$1"; SUBDIR="$2"; SUFFIX="$3"
+                            if [ -f "${SRC}" ]; then
+                                DEST="${BASE}/reports/${SUBDIR}/${PREFIX}-${SUFFIX}.json"
+                                echo "Uploading ${SRC} -> ${DEST}"
+                                aws s3 cp "${SRC}" "${DEST}" \
+                                    --content-type application/json \
+                                    --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER},report=${SUFFIX}"
+                            else
+                                echo "WARN: ${SRC} not found - skipping"
+                            fi
+                        }
+
+                        echo ""
+                        echo "-- Uploading scan reports --------------------"
+                        upload_report "${WORKSPACE}/trivy-secrets-report.json" "secrets"      "secrets"
+                        upload_report "${WORKSPACE}/trivy-fs-report.json"      "dependencies" "deps"
+                        upload_report "${WORKSPACE}/trivy-image-report.json"   "image"        "image"                        
+                        # ----------------------------------------------------
+                        # 3. JUnit / surefire reports
+                        #    Uploaded as a flat directory of XMLs (the aws-cli
+                        #    container has no `tar`). One prefix per build:
+                        #    reports/tests/<service>-<sha>-<build>/<TEST>.xml
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Uploading test reports --------------------"
+                        SUREFIRE_DIR=$(find application-backend/${SERVICE_NAME} -type d -name surefire-reports | head -1)
+                        if [ -n "${SUREFIRE_DIR}" ] && [ -d "${SUREFIRE_DIR}" ]; then
+                            TEST_DEST="${BASE}/reports/tests/${PREFIX}/"
+                            echo "Syncing ${SUREFIRE_DIR}/ -> ${TEST_DEST}"
+                            aws s3 cp "${SUREFIRE_DIR}/" "${TEST_DEST}" \
+                                --recursive \
+                                --exclude "*" \
+                                --include "*.xml" \
+                                --include "*.txt" \
+                                --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
+                        else
+                            echo "WARN: no surefire-reports found - skipping"
+                        fi
+
+                        # ----------------------------------------------------
+                        # 4. Build manifest (single source of truth)
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Resolving image digest --------------------"
+                        IMAGE_DIGEST=$(aws ecr describe-images \
+                            --repository-name "${ECR_REPO_NAME}" \
+                            --image-ids "imageTag=${GIT_SHA}" \
+                            --region "${AWS_REGION}" \
+                            --query 'imageDetails[0].imageDigest' \
+                            --output text 2>/dev/null || echo "unknown")
+
+                        MANIFEST="${WORKSPACE}/${PREFIX}-manifest.json"
+                        cat > "${MANIFEST}" <<EOF
+{
+  "service": "${SERVICE_NAME}",
+  "branch": "${SAFE_BRANCH}",
+  "gitSha": "${GIT_SHA}",
+  "gitCommit": "${GIT_COMMIT}",
+  "buildNumber": "${BUILD_NUMBER}",
+  "buildUrl": "${BUILD_URL}",
+  "jobName": "${JOB_NAME}",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "image": {
+    "uri": "${IMAGE_URI}",
+    "digest": "${IMAGE_DIGEST}"
+  },
+  "artifacts": {
+    "jar":             "${BASE}/jars/${PREFIX}.jar",
+    "secretsReport":   "${BASE}/reports/secrets/${PREFIX}-secrets.json",
+    "depsReport":      "${BASE}/reports/dependencies/${PREFIX}-deps.json",
+    "imageReport":     "${BASE}/reports/image/${PREFIX}-image.json",
+    "testReports":     "${BASE}/reports/tests/${PREFIX}/"
+  }
+}
+EOF
+
+                        echo "Uploading manifest -> ${BASE}/manifests/${PREFIX}-manifest.json"
+                        aws s3 cp "${MANIFEST}" "${BASE}/manifests/${PREFIX}-manifest.json" \
+                            --content-type application/json \
+                            --metadata "service=${SERVICE_NAME},git-sha=${GIT_SHA},build=${BUILD_NUMBER}"
+
+                        # ----------------------------------------------------
+                        # 5. Floating pointer: latest successful build per branch
+                        #    ECR tags are IMMUTABLE, so the "latest" concept
+                        #    lives in S3 (versioned + auditable) instead.
+                        #    Deployments resolve gitSha from this file, then
+                        #    pull the immutable :<gitSha> tag from ECR.
+                        # ----------------------------------------------------
+                        echo ""
+                        echo "-- Updating branch pointer -------------------"
+                        POINTER="${WORKSPACE}/${SAFE_BRANCH}-latest.json"
+                        cat > "${POINTER}" <<EOF
+{
+  "service": "${SERVICE_NAME}",
+  "branch": "${SAFE_BRANCH}",
+  "gitSha": "${GIT_SHA}",
+  "buildNumber": "${BUILD_NUMBER}",
+  "imageUri": "${IMAGE_URI}",
+  "imageDigest": "${IMAGE_DIGEST}",
+  "manifest": "${BASE}/manifests/${PREFIX}-manifest.json",
+  "updatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+                        aws s3 cp "${POINTER}" "${BASE}/latest/${SAFE_BRANCH}.json" \
+                            --content-type application/json \
+                            --metadata "service=${SERVICE_NAME},branch=${SAFE_BRANCH},git-sha=${GIT_SHA}"
+                        rm -f "${POINTER}"
+
+                        echo ""
+                        echo "-- Listing uploaded objects ------------------"
+                        aws s3 ls "${BASE}/" --recursive --human-readable | grep "${PREFIX}" || true
+
+                        echo "SUCCESS: All artifacts published to S3."
+                    '''
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "${env.SERVICE_NAME}-${env.GIT_SHA}-${env.BUILD_NUMBER}-manifest.json",
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+                success { script { logger.logSuccess('Artifacts published to S3') } }
+                failure { script { logger.logError('S3 publish failed - check IRSA s3:PutObject perms') } }
             }
         }
 
