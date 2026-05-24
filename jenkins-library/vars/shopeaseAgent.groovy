@@ -46,9 +46,7 @@ def call(Map cfg = [:]) {
     String kanikoImage      = cfg.kanikoImage      ?: 'gcr.io/kaniko-project/executor:v1.23.2-debug'
     String awsImage         = cfg.awsImage         ?: 'amazon/aws-cli:2.17.18'
     String toolsImage       = cfg.toolsImage       ?: 'aquasec/trivy:0.55.0'   // has trivy + jq baked in; we add gitleaks via initContainer
-    String jnlpImage        = cfg.jnlpImage        ?: 'jenkins/inbound-agent:latest'
-
-    return """
+    String jnlpImage        = cfg.jnlpImage        ?: 'jenkins/inbound-agent:latest'    return """
 apiVersion: v1
 kind: Pod
 metadata:
@@ -64,10 +62,11 @@ spec:
   securityContext:
     runAsUser: 0
     fsGroup: 0
-  containers:    # NOTE: requests are intentionally small (the scheduler only
-    # reserves the request amount). Limits stay generous so heavy
-    # stages (mvn, kaniko) can burst when nodes have spare capacity.
-    # ---- 1. JNLP — Jenkins agent process ----
+  # NOTE: requests are intentionally small (the scheduler only reserves
+  # the request amount). Limits stay generous so heavy stages (mvn, kaniko)
+  # can burst when nodes have spare capacity.
+  containers:
+    # ---- 1. JNLP - Jenkins agent process ----
     - name: jnlp
       image: ${jnlpImage}
       resources:
@@ -76,7 +75,7 @@ spec:
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
 
-    # ---- 2. MAVEN — mvn build/test/package ----
+    # ---- 2. MAVEN - mvn build/test/package ----
     - name: maven
       image: ${mavenImage}
       command: ["sleep"]
@@ -89,7 +88,7 @@ spec:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
         - { name: maven-cache,      mountPath: /root/.m2 }
 
-    # ---- 3. KANIKO — build & push images (no docker daemon) ----
+    # ---- 3. KANIKO - build & push images (no docker daemon) ----
     - name: kaniko
       image: ${kanikoImage}
       command: ["sleep"]
@@ -105,20 +104,19 @@ spec:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
         - { name: kaniko-cache,     mountPath: /kaniko/.cache }
 
-    # ---- 4. AWS CLI — ECR token, S3 upload, describe-images ----
+    # ---- 4. AWS CLI - ECR token, S3 upload, describe-images ----
     - name: aws
       image: ${awsImage}
       command: ["sleep"]
       args: ["infinity"]
       tty: true
-      entrypoint: [""]
       resources:
         requests: { cpu: "50m",  memory: "128Mi" }
         limits:   { cpu: "500m", memory: "512Mi" }
       volumeMounts:
         - { name: workspace-volume, mountPath: /home/jenkins/agent }
 
-    # ---- 5. TOOLS — trivy + jq + git (gitleaks added separately if needed) ----
+    # ---- 5. TOOLS - trivy + jq + git (gitleaks added separately if needed) ----
     - name: tools
       image: ${toolsImage}
       command: ["sleep"]
@@ -128,7 +126,9 @@ spec:
         requests: { cpu: "50m",  memory: "256Mi" }
         limits:   { cpu: "1",    memory: "1Gi" }
       volumeMounts:
-        - { name: workspace-volume, mountPath: /home/jenkins/agent }  volumes:
+        - { name: workspace-volume, mountPath: /home/jenkins/agent }
+
+  volumes:
     - name: workspace-volume
       emptyDir: {}
     # NOTE: All cache volumes are emptyDir (per-pod, ephemeral).
