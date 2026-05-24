@@ -375,15 +375,24 @@ pipeline {
                         fi
                         exit 0
                     '''
-                }
-
+                }                
                 container('tools') {
                     sh '''
                         set +e
                         if [ -d /root/.cache/trivy ]; then
                             echo "-- Packing Trivy DB cache -------------------"
+                            echo "Full cache size (before exclusions):"
                             du -sh /root/.cache/trivy
-                            tar -czf "${WORKSPACE}/.cache/trivy-db.tar.gz" -C /root/.cache/trivy .
+                            # Exclude trivy-java-db (~2GB lookup of every Maven artifact).
+                            # It refreshes every 3 days regardless and is too big to
+                            # ship through S3 each build - it's CHEAPER to re-download
+                            # it from GHCR on cache miss than to round-trip via S3.
+                            # The vuln DB (~40MB) is what actually benefits from caching.
+                            tar -czf "${WORKSPACE}/.cache/trivy-db.tar.gz" \
+                                --exclude='./java-db' \
+                                --exclude='./fanal' \
+                                -C /root/.cache/trivy .
+                            echo "Packed cache size (after exclusions):"
                             ls -lh "${WORKSPACE}/.cache/trivy-db.tar.gz"
                         else
                             echo "WARN: /root/.cache/trivy missing - skipping Trivy cache save"
