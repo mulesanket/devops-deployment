@@ -44,7 +44,8 @@ def call(Map cfg = [:]) {
     String serviceAccount   = cfg.serviceAccount   ?: 'jenkins-agent-builder'
     String mavenImage       = cfg.mavenImage       ?: 'maven:3.9-eclipse-temurin-21'
     String kanikoImage      = cfg.kanikoImage      ?: 'gcr.io/kaniko-project/executor:v1.23.2-debug'
-    String awsImage         = cfg.awsImage         ?: 'amazon/aws-cli:2.17.18'    String toolsImage       = cfg.toolsImage       ?: 'aquasec/trivy:0.55.0'   // has trivy + jq baked in; we add gitleaks via initContainer
+    String awsImage         = cfg.awsImage         ?: 'amazon/aws-cli:2.17.18'
+    String toolsImage       = cfg.toolsImage       ?: 'aquasec/trivy:0.55.0'   // has trivy + jq baked in; we add gitleaks via initContainer
     String jnlpImage        = cfg.jnlpImage        ?: 'jenkins/inbound-agent:latest'
 
     return """
