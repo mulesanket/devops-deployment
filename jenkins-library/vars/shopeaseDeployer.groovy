@@ -88,8 +88,7 @@ spec:
           memory: "512Mi"
       volumeMounts:
         - name: workspace-volume
-          mountPath: /home/jenkins/agent
-    - name: aws
+          mountPath: /home/jenkins/agent    - name: aws
       image: ${awsImage}
       command: ["sleep"]
       args: ["infinity"]
@@ -100,9 +99,7 @@ spec:
           memory: "128Mi"
         limits:
           cpu: "500m"
-          memory: "512Mi"      env:
-        - name: AWS_SDK_LOAD_CONFIG
-          value: "true"
+          memory: "512Mi"
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
