@@ -47,7 +47,8 @@ def call(Map cfg = [:]) {
     String serviceName = cfg.serviceName ?: error('shopeaseDeployer: serviceName is required')
 
     String namespace      = cfg.namespace      ?: 'jenkins-cicd-agents'
-    String serviceAccount = cfg.serviceAccount ?: 'jenkins-agent-builder'    String awsImage       = cfg.awsImage       ?: 'amazon/aws-cli:2.17.18'
+    String serviceAccount = cfg.serviceAccount ?: 'jenkins-agent-builder'
+    String awsImage       = cfg.awsImage       ?: 'amazon/aws-cli:2.17.18'
     // kubectl image: rancher/kubectl is small, public, well-maintained, and
     // pinned to a K8s patch release. Keep the minor version within +/-1 of
     // the EKS control plane minor version (currently 1.30 in dev).
