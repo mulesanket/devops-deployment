@@ -76,7 +76,8 @@ spec:
   securityContext:
     runAsUser: 0
     fsGroup: 0
-  containers:    - name: jnlp
+  containers:
+    - name: jnlp
       image: ${jnlpImage}
       resources:
         requests:
