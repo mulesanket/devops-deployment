@@ -76,8 +76,7 @@ spec:
   securityContext:
     runAsUser: 0
     fsGroup: 0
-  containers:
-    - name: jnlp
+  containers:    - name: jnlp
       image: ${jnlpImage}
       resources:
         requests:
@@ -88,7 +87,8 @@ spec:
           memory: "512Mi"
       volumeMounts:
         - name: workspace-volume
-          mountPath: /home/jenkins/agent    - name: aws
+          mountPath: /home/jenkins/agent
+    - name: aws
       image: ${awsImage}
       command: ["sleep"]
       args: ["infinity"]
