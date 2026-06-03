@@ -74,7 +74,7 @@ spec:
           # in git so the deployment.yaml is always valid YAML and
           # diff-friendly. The repo+region prefix is hard-coded because
           # it never changes across environments for this service.
-          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-auth-service:IMAGE_TAG_PLACEHOLDER
+          image: 483829975256.dkr.ecr.ap-south-1.amazonaws.com/shopease-webapp-development-auth-service:503e039
           imagePullPolicy: IfNotPresent
 
           ports:
