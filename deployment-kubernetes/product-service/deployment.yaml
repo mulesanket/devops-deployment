@@ -18,8 +18,15 @@ spec:
       maxUnavailable: 0
       maxSurge: 1
 
+# A new Pod must stay ready for at least 10 seconds before Kubernetes considers it available.
+# Good for avoiding traffic to unstable Pods.
   minReadySeconds: 10
+
+# Kubernetes keeps last 5 ReplicaSet revisions. This helps Rollback
   revisionHistoryLimit: 5
+
+#Kubernetes waits up to 600 seconds, meaning 10 minutes, for rollout progress.
+#If new Pods do not become ready within this time, rollout is marked failed.
   progressDeadlineSeconds: 600
 
   template:
