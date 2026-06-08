@@ -1,0 +1,732 @@
+# Architecture Issues and Debugging Approach
+
+## Current Traffic Flow
+
+User
+→ CloudFront + AWS WAF
+→ ALB Ingress
+→ EKS Pods
+→ Aurora PostgreSQL / S3 / SNS / SQS / Lambda / SES
+
+Note: We are not using NLB. We are using ALB Ingress with target-type IP, so ALB directly registers Pod IPs in the target group.
+
+---
+
+## 1. Frontend / CloudFront Issue
+
+### Issue
+
+Frontend page is not loading or old frontend content is showing.
+
+### Possible Reasons
+
+- CloudFront cache issue
+- S3 origin issue
+- Latest React build not uploaded properly
+- WAF blocking the request
+- DNS issue
+- S3 bucket policy or OAC issue
+- CloudFront invalidation not done after deployment
+
+### Debugging Approach
+
+First, I check whether the domain is resolving correctly and whether the request is reaching CloudFront.
+
+I check:
+
+- Route 53 DNS record
+- CloudFront distribution status
+- CloudFront origin configuration
+- CloudFront cache behavior
+- S3 bucket objects
+- S3 bucket policy or OAC configuration
+- WAF sampled requests
+- CloudFront invalidation status
+
+Commands:
+
+    curl -I https://app-domain.com
+    curl -v https://app-domain.com
+
+### Interview Answer
+
+If the frontend is not loading, I first check the browser network tab or use curl to see the CloudFront response. Then I verify CloudFront origin, cache behavior, S3 objects, WAF logs, and DNS. If old content is showing, I check whether CloudFront invalidation was done after the latest deployment.
+
+---
+
+## 2. WAF Issue
+
+### Issue
+
+Valid users are getting blocked or receiving 403 errors.
+
+### Possible Reasons
+
+- AWS managed rule false positive
+- Rate-based rule blocking users
+- IP reputation rule blocking traffic
+- Custom WAF rule misconfiguration
+- Request matched a blocked SQL injection or XSS pattern
+
+### Debugging Approach
+
+I check:
+
+- WAF sampled requests
+- Blocked rule name
+- CloudFront/WAF logs
+- Rule action: Count or Block
+- Source IP, URI path, headers, and request pattern
+
+### Interview Answer
+
+If users are getting blocked, I check WAF sampled requests to identify which rule blocked the traffic. If it is a false positive, we tune the rule, add an exception, or first move the rule to count mode before enforcing block.
+
+---
+
+## 3. CloudFront API Routing Issue
+
+### Issue
+
+Frontend loads, but backend API calls fail.
+
+### Possible Reasons
+
+- /api/* behavior missing in CloudFront
+- API traffic routed to S3 instead of ALB
+- ALB origin misconfigured
+- Required HTTP methods not allowed
+- Headers or cookies not forwarded properly
+- CORS issue
+- WAF blocking API request
+- ALB target group unhealthy
+
+### Debugging Approach
+
+I check:
+
+- CloudFront behavior for /api/*
+- Whether /api/* is mapped to ALB origin
+- Allowed HTTP methods like GET, POST, PUT, DELETE, OPTIONS
+- Header forwarding
+- CORS response headers
+- WAF logs
+- ALB target group health
+
+Commands:
+
+    curl -I https://app-domain.com/api/health
+    curl -v https://app-domain.com/api/health
+
+### Interview Answer
+
+If the frontend loads but API calls fail, I check CloudFront path-based routing first. Static frontend requests should go to S3, and API requests like /api/* should go to ALB. Then I verify ALB target health, CORS, and whether CloudFront is forwarding required headers and methods.
+
+---
+
+## 4. ALB / Ingress Issue
+
+### Issue
+
+ALB is not getting created from Kubernetes Ingress.
+
+### Possible Reasons
+
+- AWS Load Balancer Controller is not running
+- Incorrect Ingress annotations
+- Missing or wrong IngressClass
+- IAM permission issue with ALB controller role
+- Public/private subnet tags are missing
+- Security group creation permission issue
+
+### Debugging Approach
+
+I check:
+
+- Kubernetes Ingress events
+- AWS Load Balancer Controller logs
+- Ingress annotations
+- IngressClass
+- IAM role permissions of ALB controller
+- Subnet tags
+
+Important subnet tags:
+
+    kubernetes.io/cluster/<cluster-name> = shared or owned
+    kubernetes.io/role/elb = 1
+    kubernetes.io/role/internal-elb = 1
+
+Commands:
+
+    kubectl get ingress -n <namespace>
+    kubectl describe ingress <ingress-name> -n <namespace>
+    kubectl get pods -n kube-system | grep aws-load-balancer
+    kubectl logs -n kube-system deployment/aws-load-balancer-controller
+
+### Interview Answer
+
+If ALB is not created, I check Ingress describe output and AWS Load Balancer Controller logs. Common causes are missing subnet tags, wrong annotations, wrong IngressClass, or IAM permission issues with the controller role.
+
+---
+
+## 5. ALB Target Group Issue with target-type IP
+
+### Issue
+
+ALB is created, but target group targets are unhealthy.
+
+### Important Point
+
+We are using:
+
+    alb.ingress.kubernetes.io/target-type: ip
+
+So ALB directly registers Pod IPs in the target group.
+
+### Possible Reasons
+
+- Pod is not ready
+- Readiness probe is failing
+- Service selector does not match pod labels
+- Service targetPort is incorrect
+- Target group health check path is wrong
+- Application is listening on a different port
+- Security group does not allow ALB to reach pod IPs
+- VPC CNI networking issue
+- Pod is restarting frequently
+
+### Debugging Approach
+
+I check:
+
+- Pod status
+- Pod readiness
+- Service selector
+- Pod labels
+- Service endpoints
+- Ingress health check path
+- Application port
+- ALB target group health
+- AWS Load Balancer Controller logs
+
+Commands:
+
+    kubectl get pods -n <namespace> -o wide
+    kubectl get svc -n <namespace>
+    kubectl describe svc <service-name> -n <namespace>
+    kubectl get endpoints <service-name> -n <namespace>
+    kubectl get endpointslice -n <namespace>
+    kubectl describe ingress <ingress-name> -n <namespace>
+    kubectl describe pod <pod-name> -n <namespace>
+    kubectl logs <pod-name> -n <namespace>
+
+### Interview Answer
+
+Since we use target-type IP, ALB directly registers Pod IPs. If targets are unhealthy, I check pod readiness, service selector, endpoints, health check path, application port, and security group rules. If endpoints are empty, mostly the service selector is not matching pod labels or pods are not ready.
+
+---
+
+## 6. Kubernetes Service Issue
+
+### Issue
+
+Kubernetes Service is not routing traffic to pods.
+
+### Possible Reasons
+
+- Service selector mismatch
+- Pod labels mismatch
+- Wrong targetPort
+- Pod is not ready
+- Application port mismatch
+
+### Debugging Approach
+
+I check:
+
+- Service selector
+- Pod labels
+- Service endpoints
+- targetPort
+- Pod readiness
+
+Commands:
+
+    kubectl get svc -n <namespace>
+    kubectl describe svc <service-name> -n <namespace>
+    kubectl get pods -n <namespace> --show-labels
+    kubectl get endpoints <service-name> -n <namespace>
+
+### Interview Answer
+
+If Service is not routing traffic, I check whether the Service selector matches pod labels. Then I check endpoints. If endpoints are empty, traffic will not reach pods. I also verify service port and targetPort mapping.
+
+---
+
+## 7. Pod CrashLoopBackOff Issue
+
+### Issue
+
+Pod is restarting continuously.
+
+### Possible Reasons
+
+- Application startup failure
+- Missing environment variable
+- ConfigMap or Secret issue
+- Database connection failure
+- Wrong image version
+- JVM memory issue
+- Liveness probe killing the pod
+- Dependency service unavailable
+
+### Debugging Approach
+
+I check:
+
+- Current pod logs
+- Previous pod logs
+- Pod events
+- Environment variables
+- ConfigMap/Secret
+- Database connectivity
+- Probe configuration
+
+Commands:
+
+    kubectl describe pod <pod-name> -n <namespace>
+    kubectl logs <pod-name> -n <namespace>
+    kubectl logs <pod-name> -n <namespace> --previous
+
+### Interview Answer
+
+For CrashLoopBackOff, I first check pod logs and previous logs. Then I check pod events, environment variables, secrets, config maps, database connectivity, and probe configuration.
+
+---
+
+## 8. Pod Pending Issue
+
+### Issue
+
+Pod is stuck in Pending state.
+
+### Possible Reasons
+
+- Insufficient CPU or memory on nodes
+- Node selector issue
+- Taints and tolerations issue
+- Node affinity issue
+- PVC not bound
+- Cluster Autoscaler/Karpenter not scaling nodes
+- Required node group unavailable
+
+### Debugging Approach
+
+I check:
+
+- Pod events
+- Node capacity
+- Taints
+- Affinity rules
+- PVC status
+- Cluster autoscaler events
+
+Commands:
+
+    kubectl describe pod <pod-name> -n <namespace>
+    kubectl get nodes
+    kubectl describe node <node-name>
+    kubectl top nodes
+    kubectl get events -n <namespace> --sort-by=.lastTimestamp
+
+### Interview Answer
+
+For Pending pods, I check pod events first. Events usually tell whether the issue is insufficient resources, taints, affinity, or volume binding. Based on that, I scale nodes or fix the scheduling configuration.
+
+---
+
+## 9. ImagePullBackOff Issue
+
+### Issue
+
+Pod cannot pull image from ECR.
+
+### Possible Reasons
+
+- Wrong image tag
+- Image not present in ECR
+- Wrong ECR repository URL
+- IAM permission issue
+- ECR/network connectivity issue
+- Image deleted by ECR lifecycle policy
+
+### Debugging Approach
+
+I check:
+
+- Image URI
+- Image tag in ECR
+- ECR repository
+- Node IAM permission
+- ECR connectivity
+- Pod events
+
+Commands:
+
+    kubectl describe pod <pod-name> -n <namespace>
+    aws ecr describe-images --repository-name <repo-name>
+
+### Interview Answer
+
+If pod shows ImagePullBackOff, I verify whether the image tag exists in ECR, whether the image URI is correct, and whether worker nodes have permission and connectivity to pull the image.
+
+---
+
+## 10. Database Connectivity Issue
+
+### Issue
+
+Backend cannot connect to Aurora PostgreSQL.
+
+### Possible Reasons
+
+- Wrong DB endpoint
+- Wrong credentials
+- Security group issue
+- Aurora cluster unavailable
+- DB is in private subnet and not reachable from EKS
+- DNS issue
+- Max DB connections reached
+- Connection pool issue
+
+### Debugging Approach
+
+I check:
+
+- Backend pod logs
+- Aurora cluster status
+- DB writer endpoint
+- DB credentials
+- Security groups
+- Route tables / NACL
+- DB connection count
+- Connectivity from pod to DB on port 5432
+
+Commands:
+
+    kubectl logs <backend-pod> -n <namespace>
+    kubectl exec -it <pod-name> -n <namespace> -- sh
+    nslookup <aurora-endpoint>
+    nc -zv <aurora-endpoint> 5432
+
+### Interview Answer
+
+If backend cannot connect to Aurora, I check application logs, DB endpoint, credentials, security groups, and network connectivity from the pod. Since Aurora is private, only backend/EKS security group should be allowed on PostgreSQL port 5432.
+
+---
+
+## 11. Aurora Performance Issue
+
+### Issue
+
+Application is slow because of database performance.
+
+### Possible Reasons
+
+- High DB connections
+- Slow queries
+- Missing indexes
+- Locking/blocking queries
+- CPU or ACU scaling pressure
+- Connection pool misconfiguration
+- Long-running transactions
+
+### Debugging Approach
+
+I check:
+
+- CloudWatch DB metrics
+- Aurora Performance Insights
+- CPU / ACU usage
+- DB connections
+- Deadlocks
+- Slow queries
+- Application timeout logs
+
+### Interview Answer
+
+If database latency is suspected, I check Aurora CloudWatch metrics and Performance Insights. I look for high connections, slow queries, blocking sessions, CPU/ACU pressure, deadlocks, and application timeout errors.
+
+---
+
+## 12. S3 / VPC Endpoint Issue
+
+### Issue
+
+Backend cannot access S3 privately.
+
+### Possible Reasons
+
+- IAM permission missing
+- Bucket policy blocking access
+- VPC endpoint policy issue
+- Route table not associated with S3 gateway endpoint
+- Wrong bucket or object path
+- Bucket encryption/KMS permission issue
+
+### Debugging Approach
+
+I check:
+
+- IAM role permissions
+- S3 bucket policy
+- VPC endpoint policy
+- Route table association
+- Pod IAM role or node IAM role
+- Bucket encryption policy
+
+Command:
+
+    aws s3 ls s3://<bucket-name>
+
+### Interview Answer
+
+If backend cannot access S3, I check IAM permissions, bucket policy, and VPC endpoint configuration. Since access is private, the route table must be associated with the S3 gateway endpoint and the endpoint policy should allow required bucket actions.
+
+---
+
+## 13. Signup Email Flow Issue
+
+### Issue
+
+User is created, but email is not received.
+
+### Flow
+
+Backend
+→ SNS
+→ SQS
+→ Lambda
+→ SES
+→ User Email
+
+### Possible Reasons
+
+- Backend did not publish signup event
+- SNS subscription issue
+- Message stuck in SQS
+- Lambda trigger disabled
+- Lambda failed
+- SES identity/domain not verified
+- SES sandbox restriction
+- IAM permission issue
+- Message moved to DLQ
+
+### Debugging Approach
+
+I check:
+
+- Backend application logs
+- SNS topic metrics
+- SNS subscription status
+- SQS queue messages
+- SQS DLQ
+- Lambda CloudWatch logs
+- Lambda trigger status
+- Lambda execution role permissions
+- SES sending metrics
+- SES verified identity/domain
+
+### Interview Answer
+
+If signup succeeds but email is not received, I trace the async flow step by step. First I confirm backend published the event. Then I check SNS delivery, SQS messages, Lambda logs, DLQ, and SES delivery status.
+
+---
+
+## 14. Lambda Issue
+
+### Issue
+
+Lambda fails to process SQS messages.
+
+### Possible Reasons
+
+- Code error
+- Timeout issue
+- Memory issue
+- IAM permission issue
+- Environment variable missing
+- Wrong message format
+- SES sending issue
+
+### Debugging Approach
+
+I check:
+
+- Lambda CloudWatch logs
+- Timeout and memory
+- Environment variables
+- IAM role permissions
+- SQS trigger
+- DLQ
+
+Command:
+
+    aws logs tail /aws/lambda/<function-name> --follow
+
+### Interview Answer
+
+For Lambda failures, I check CloudWatch logs first. Then I verify timeout, memory, environment variables, IAM permissions, and failed messages in DLQ.
+
+---
+
+## 15. SES Issue
+
+### Issue
+
+SES is not sending emails.
+
+### Possible Reasons
+
+- Email/domain identity not verified
+- SES account is in sandbox
+- Recipient not verified in sandbox mode
+- Sending quota exceeded
+- Lambda role does not have SES permission
+- Email rejected due to policy/content
+- DKIM/SPF records not configured properly
+
+### Debugging Approach
+
+I check:
+
+- SES verified identities
+- SES sandbox status
+- SES sending quota
+- SES bounce/complaint metrics
+- Lambda logs
+- IAM permission for ses:SendEmail or ses:SendRawEmail
+- DKIM/SPF records
+
+### Interview Answer
+
+If SES email is not received, I check whether SES domain or email identity is verified, whether the account is still in sandbox, and whether sending quota is available. I also check Lambda logs and IAM permissions.
+
+---
+
+## 16. Deployment / Rollout Issue
+
+### Issue
+
+New deployment failed.
+
+### Possible Reasons
+
+- Wrong image tag
+- New application bug
+- ConfigMap/Secret issue
+- Readiness probe failing
+- DB migration issue
+- Resource limit issue
+- Application startup issue
+
+### Debugging Approach
+
+I check:
+
+- Deployment rollout status
+- ReplicaSets
+- Pod events
+- Pod logs
+- Readiness probe
+- Image tag
+- ConfigMap/Secret changes
+
+Commands:
+
+    kubectl rollout status deployment/<deployment-name> -n <namespace>
+    kubectl describe deployment <deployment-name> -n <namespace>
+    kubectl get rs -n <namespace>
+    kubectl get pods -n <namespace>
+    kubectl logs <pod-name> -n <namespace>
+
+Rollback command:
+
+    kubectl rollout undo deployment/<deployment-name> -n <namespace>
+
+### Interview Answer
+
+If deployment fails, I check rollout status, ReplicaSet, pod events, and pod logs. If the issue impacts users, I rollback to the previous stable version using Kubernetes rollout undo.
+
+---
+
+## 17. CloudWatch / Logging Issue
+
+### Issue
+
+Application issue happened, but logs are missing in CloudWatch.
+
+### Possible Reasons
+
+- Application is not writing logs to stdout/stderr
+- Fluent Bit / CloudWatch agent issue
+- IAM permission missing
+- Wrong log group or log stream
+- Log retention/filtering issue
+
+### Debugging Approach
+
+I check:
+
+- Pod logs using kubectl
+- CloudWatch log group
+- Log agent pods
+- IAM permissions
+- Fluent Bit or CloudWatch agent configuration
+- Application logging configuration
+
+Commands:
+
+    kubectl logs <pod-name> -n <namespace>
+    kubectl get pods -n amazon-cloudwatch
+    kubectl logs <cloudwatch-agent-pod> -n amazon-cloudwatch
+
+### Interview Answer
+
+If logs are missing in CloudWatch, I first check pod logs using kubectl. If logs exist in Kubernetes but not in CloudWatch, I check the log agent, IAM permissions, log group configuration, and whether the application is logging to stdout/stderr.
+
+---
+
+## Common End-to-End Debugging Flow
+
+When an application issue happens, I follow the request path:
+
+1. Check DNS / Route 53
+2. Check CloudFront response
+3. Check WAF logs
+4. Check CloudFront behavior and origin routing
+5. Check ALB listener rules and target group health
+6. Check Kubernetes Ingress
+7. Check Kubernetes Service and Endpoints
+8. Check Pod status and logs
+9. Check Aurora connectivity and DB metrics
+10. Check SNS, SQS, Lambda, SES for async issues
+11. Check CloudWatch logs and metrics
+
+---
+
+## Final Interview Answer
+
+If there is an issue in this architecture, I debug it layer by layer.
+
+First, I check whether the issue is at DNS, CloudFront, WAF, or routing level. If the frontend is loading but API is failing, I check CloudFront API behavior and ALB origin configuration.
+
+Then I check ALB listener rules and target group health. Since we use ALB Ingress with target-type IP, Pod IPs are registered directly in the target group. If targets are unhealthy, I check pod readiness, service selector, endpoints, health check path, application port, and security group rules.
+
+Inside Kubernetes, I check Ingress events, Service, Endpoints, pod status, pod logs, and deployment rollout status.
+
+If backend is working but database operations are failing, I check Aurora status, security groups, DB endpoint, credentials, and connectivity from the pod.
+
+For signup or email issues, I trace the async flow from backend to SNS, SQS, Lambda, and SES. I also check DLQ and CloudWatch logs.
+
+Overall, I follow the request path from edge to backend to database and debug each component based on where the failure is happening.
